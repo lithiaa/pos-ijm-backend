@@ -1,0 +1,15 @@
+# Environment
+venv/
+.env
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.DS_Store
+
+# Sub-repo & data (repo terpisah / bukan kode)
+frontend/
+storage/
+*.db
+*.sqlite3

@@ -1,0 +1,57 @@
+# .claudeignore
+# List of files and directories to ignore when indexing by Claude.
+# The format is similar to .gitignore.
+
+# Ignore common build and dependency directories
+build/
+dist/
+node_modules/
+vendor/
+.venv/
+env/
+venv/
+.next/
+.serverless/
+.terraform/
+target/
+
+# Ignore common log, temp, and cache files
+*.log
+*.tmp
+.cache/
+.pytest_cache/
+__pycache__/
+
+# Ignore dotfiles and other editor/IDE-specific files
+.DS_Store
+.env
+.env.*
+.vscode/
+.idea/
+.project
+.settings/
+.classpath
+
+# Ignore large or binary files
+*.sqlite3
+*.db
+*.bak
+*.swp
+*.swo
+*.pyc
+*.bin
+*.min.js
+*.min.css
+
+# Ignore Claude-specific directories
+.claude/
+
+# Ignore generated documentation
+docs/
+_build/
+html/
+
+# Ignore specific project files
+pos-lithia-nginx.conf
+storage/
+frontend/build/
