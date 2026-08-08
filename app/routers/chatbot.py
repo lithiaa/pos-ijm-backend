@@ -13,6 +13,7 @@ from app.models.transaksi import StokSaatIni
 from app.models.kategori import Kategori
 from app.models.supplier import Supplier
 from app.services.harga import harga_decode, harga_encode
+from app.services.print_client import print_job_async
 from app.routers.upload import STORAGE_DIR as FOTO_STORAGE_DIR
 
 router = APIRouter(
@@ -323,6 +324,17 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
             job = PrintJob(barang_id=barang_id, qty=qty, status="pending")
             db.add(job)
             db.commit()
+            try:
+                print_job_async(
+                    nama=barang.nama,
+                    harga_jual=int(barang.harga_jual or 0),
+                    sku=barang.sku or "",
+                    stok=0,
+                    satuan=barang.satuan or "pcs",
+                    qty=qty,
+                )
+            except Exception:
+                pass
             response = f"✅ Cetak {qty} label untuk {barang.nama} (ID:{barang_id}) masuk antrian. Printer akan mencetak otomatis."
         except ValueError:
             response = "ID atau Qty tidak valid."
@@ -395,6 +407,17 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                         job = PrintJob(barang_id=barang_id, qty=jumlah, status="pending")
                         db.add(job)
                         db.commit()
+                        try:
+                            print_job_async(
+                                nama=db_barang.nama,
+                                harga_jual=int(db_barang.harga_jual or 0),
+                                sku=db_barang.sku or "",
+                                stok=0,
+                                satuan=db_barang.satuan or "pcs",
+                                qty=jumlah,
+                            )
+                        except Exception:
+                            pass
                         response += " Label akan dicetak otomatis."
             except Exception as e:
                 db.rollback()
