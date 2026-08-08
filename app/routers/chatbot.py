@@ -9,7 +9,7 @@ import requests
 
 from app.database import get_db
 from app.models.barang import Barang
-from app.models.transaksi import StokSaatIni
+from app.models.transaksi import StokSaatIni, TransaksiStok
 from app.models.kategori import Kategori
 from app.models.supplier import Supplier
 from app.services.harga import harga_decode, harga_encode
@@ -328,6 +328,7 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                 print_job_async(
                     nama=barang.nama,
                     harga_jual=int(barang.harga_jual or 0),
+                    harga_beli=int(barang.harga_modal or 0),
                     sku=barang.sku or "",
                     stok=0,
                     satuan=barang.satuan or "pcs",
@@ -371,7 +372,6 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                 harga = int(params.get("harga", 0))
                 keterangan = params.get("keterangan", "")
 
-                from app.models.transaksi import StokSaatIni, TransaksiStok as Ts
                 db_barang = db.query(Barang).filter(Barang.id == barang_id).first()
                 if not db_barang:
                     response = f"Barang ID {barang_id} tidak ditemukan."
@@ -385,7 +385,7 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
 
                     # Record transaksi
                     total = harga * jumlah if harga else 0
-                    ts = Ts(
+                    ts = TransaksiStok(
                         barang_id=barang_id, jenis="masuk", jumlah=jumlah,
                         harga_satuan=harga or None, total_harga=total or None,
                         keterangan=keterangan or None,
@@ -411,6 +411,7 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                             print_job_async(
                                 nama=db_barang.nama,
                                 harga_jual=int(db_barang.harga_jual or 0),
+                                harga_beli=int(db_barang.harga_modal or 0),
                                 sku=db_barang.sku or "",
                                 stok=0,
                                 satuan=db_barang.satuan or "pcs",

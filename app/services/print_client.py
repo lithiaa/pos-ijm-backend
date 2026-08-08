@@ -23,6 +23,7 @@ def is_configured() -> bool:
 def send_print_job(
     nama: str,
     harga_jual: int,
+    harga_beli: int = 0,
     sku: str = "",
     stok: int = 0,
     satuan: str = "pcs",
@@ -35,6 +36,7 @@ def send_print_job(
     payload = {
         "nama": nama,
         "hargaJual": harga_jual,
+        "hargaBeli": harga_beli,
         "sku": sku or "000000",
         "stok": stok,
         "satuan": satuan,
@@ -55,10 +57,10 @@ def send_print_job(
         return {"ok": False, "error": str(e)}
 
 
-def print_job_async(nama, harga_jual, sku="", stok=0, satuan="pcs", qty=1, on_done=None):
+def print_job_async(nama, harga_jual, harga_beli=0, sku="", stok=0, satuan="pcs", qty=1, on_done=None):
     """Kirim print job di thread terpisah (tidak block request chatbot)."""
     def _run():
-        result = send_print_job(nama, harga_jual, sku, stok, satuan, qty)
+        result = send_print_job(nama, harga_jual, harga_beli, sku, stok, satuan, qty)
         if on_done:
             on_done(result)
 
