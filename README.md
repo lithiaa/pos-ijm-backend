@@ -116,6 +116,7 @@ DATABASE_URL=mysql+pymysql://user:password@localhost:3306/toko_sparepart
 SECRET_KEY=isi-dengan-random-string-panjang
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=480
+POS_INTEGRATION_KEY=ganti-dengan-kunci-integrasi-yang-panjang
 
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
@@ -223,6 +224,33 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 | `POST` | `/api/barang` | Tambah barang baru |
 | `PUT` | `/api/barang/{id}` | Edit barang |
 | `DELETE` | `/api/barang/{id}` | Hapus barang |
+
+### 🔗 Integrasi Lithia POS
+
+Endpoint khusus integrasi menggunakan header `X-Integration-Key` yang nilainya
+diambil dari `POS_INTEGRATION_KEY`. SKU pada path dan saat pembuatan selalu
+dinormalisasi dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| `GET` | `/api/integration/barang/by-sku/{sku}` | Ambil barang berdasarkan SKU persis |
+| `POST` | `/api/integration/barang` | Buat barang dengan SKU manual dan harga numerik |
+| `PUT` | `/api/integration/barang/by-sku/{sku}` | Ubah nama, harga beli, dan harga jual |
+
+Contoh payload `POST`:
+
+```json
+{
+  "sku": "OIL-001",
+  "nama": "Oil Filter",
+  "harga_beli": 45000,
+  "harga_jual": 60000
+}
+```
+
+`stok` dan `satuan` bersifat opsional dengan nilai default `0` dan `"pcs"`.
+Respons menyertakan harga numerik serta `harga_beli_kode` yang dibentuk dengan
+kode harga SANGUOERIP.
 
 **Query params untuk GET `/api/barang`:**
 
