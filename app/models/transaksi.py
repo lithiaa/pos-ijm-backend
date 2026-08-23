@@ -28,3 +28,18 @@ class TransaksiStok(Base):
 
     barang = relationship("Barang")
     user = relationship("User", foreign_keys=[user_id])
+
+
+class IntegrationStockOperation(Base):
+    __tablename__ = "integration_stock_operations"
+
+    operation_id = Column(String(36), primary_key=True)
+    barang_id = Column(
+        Integer,
+        ForeignKey("barang.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at = Column(DateTime, server_default=func.now())
+
+    barang = relationship("Barang")

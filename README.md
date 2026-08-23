@@ -234,8 +234,9 @@ dinormalisasi dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 | Method | Endpoint | Fungsi |
 |---|---|---|
 | `GET` | `/api/integration/barang/by-sku/{sku}` | Ambil barang berdasarkan SKU persis |
-| `POST` | `/api/integration/barang` | Buat barang dengan SKU manual dan harga numerik |
+| `POST` | `/api/integration/barang` | Buat barang dan stok masuk awal secara atomik |
 | `PUT` | `/api/integration/barang/by-sku/{sku}` | Ubah nama, harga beli, dan harga jual |
+| `POST` | `/api/integration/barang/by-sku/{sku}/stok-masuk` | Tambah stok barang yang sudah ada secara idempoten |
 
 Contoh payload `POST`:
 
@@ -244,13 +245,30 @@ Contoh payload `POST`:
   "sku": "OIL-001",
   "nama": "Oil Filter",
   "harga_beli": 45000,
-  "harga_jual": 60000
+  "harga_jual": 60000,
+  "jumlah_barang_masuk": 10,
+  "operation_id": "b71d24f8-24a8-4e79-8c3c-e330807ca8ec"
 }
 ```
 
-`stok` dan `satuan` bersifat opsional dengan nilai default `0` dan `"pcs"`.
-Respons menyertakan harga numerik serta `harga_beli_kode` yang dibentuk dengan
-kode harga SANGUOERIP.
+`jumlah_barang_masuk` adalah integer wajib minimal `0`; jumlah label cetak tidak
+termasuk payload POS. `operation_id` adalah UUID wajib dan harus unik untuk
+setiap submit. Retry dengan UUID yang sama tidak menambah stok dua kali.
+`satuan` tetap opsional dengan nilai default `"pcs"`. Respons menyertakan stok
+terkini, harga numerik, dan `harga_beli_kode` yang dibentuk dengan kode harga
+SANGUOERIP.
+
+Contoh payload stok masuk untuk barang yang sudah ada:
+
+```json
+{
+  "jumlah_barang_masuk": 5,
+  "harga_satuan": 45000,
+  "operation_id": "f335a272-39a3-4aa9-b836-da430958927f"
+}
+```
+
+Perubahan metadata melalui `PUT` tetap terpisah dan tidak mengubah stok.
 
 **Query params untuk GET `/api/barang`:**
 

@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 
@@ -8,7 +10,8 @@ class IntegrationBarangCreate(BaseModel):
     nama: str = Field(min_length=1, max_length=200)
     harga_beli: StrictInt = Field(ge=0)
     harga_jual: StrictInt = Field(ge=0)
-    stok: StrictInt = Field(default=0, ge=0)
+    jumlah_barang_masuk: StrictInt = Field(ge=0)
+    operation_id: UUID
     satuan: str = Field(default="pcs", min_length=1, max_length=20)
 
     @field_validator("sku")
@@ -42,6 +45,14 @@ class IntegrationBarangUpdate(BaseModel):
         if not normalized:
             raise ValueError("name must not be blank")
         return normalized
+
+
+class IntegrationStokMasuk(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    jumlah_barang_masuk: StrictInt = Field(ge=0)
+    harga_satuan: StrictInt = Field(ge=0)
+    operation_id: UUID
 
 
 class IntegrationBarangOut(BaseModel):
