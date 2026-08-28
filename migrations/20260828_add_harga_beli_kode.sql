@@ -1,0 +1,16 @@
+-- Migration: independent harga_beli_kode storage
+-- Created: 2026-08-28
+--
+-- This file is DOCUMENTATION ONLY. Do not run it directly — running it
+-- twice fails with duplicate column (MySQL has no IF NOT EXISTS for columns).
+--
+-- The canonical, idempotent entry point is:
+--
+--   python migrations/20260828_backfill_harga_beli_kode.py
+--
+-- which checks INFORMATION_SCHEMA via SQLAlchemy inspect(), adds the column
+-- only when missing, and backfills existing rows with the current SANGUOERIP
+-- encoding of harga_modal (one-time snapshot, never re-derived afterwards).
+
+-- Equivalent one-time DDL (for reference / fresh databases):
+-- ALTER TABLE barang ADD COLUMN harga_beli_kode VARCHAR(50) NULL;

@@ -18,7 +18,6 @@ from app.schemas.integration_barang import (
     IntegrationBarangUpdate,
     IntegrationStokMasuk,
 )
-from app.services.harga import harga_encode
 
 
 router = APIRouter(
@@ -56,7 +55,7 @@ def _to_integration_out(barang: Barang) -> IntegrationBarangOut:
         nama=barang.nama,
         harga_beli=harga_beli,
         harga_jual=int(barang.harga_jual or 0),
-        harga_beli_kode=harga_encode(harga_beli),
+        harga_beli_kode=barang.harga_beli_kode or "",
         stok=barang.stok.jumlah if barang.stok else 0,
         satuan=barang.satuan or "pcs",
     )
@@ -185,6 +184,7 @@ def create_integration_barang(
         sku=req.sku,
         nama=req.nama,
         harga_modal=req.harga_beli,
+        harga_beli_kode=req.harga_beli_kode,
         harga_jual=req.harga_jual,
         satuan=req.satuan,
     )
@@ -300,6 +300,8 @@ def update_integration_barang(
 
     barang.nama = req.nama
     barang.harga_modal = req.harga_beli
+    if req.harga_beli_kode is not None:
+        barang.harga_beli_kode = req.harga_beli_kode
     barang.harga_jual = req.harga_jual
 
     try:

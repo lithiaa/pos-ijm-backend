@@ -137,7 +137,7 @@ def generate_sticker_html(barang_id: int, qty: int, size_id: Optional[str], db: 
             harga_jual=barang.harga_jual or 0,
             kode_jual=harga_encode(barang.harga_jual or 0),
             harga_beli=barang.harga_modal or 0,
-            kode_beli=harga_encode(barang.harga_modal or 0),
+            kode_beli=barang.harga_beli_kode or "",
             sku=barang.sku or "-",
         )
         for _ in range(qty)

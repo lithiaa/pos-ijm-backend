@@ -40,6 +40,7 @@ def _barang_to_out(b: Barang) -> BarangOut:
         kategori=kat_out,
         supplier=sup_out,
         harga_modal=b.harga_modal,
+        harga_beli_kode=b.harga_beli_kode or "",
         harga_jual=b.harga_jual,
         harga_jual_kode=harga_encode(b.harga_jual),
         stok_minimum=b.stok_minimum,
@@ -128,6 +129,7 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
         kategori_id=req.kategori_id,
         supplier_id=req.supplier_id,
         harga_modal=req.harga_modal,
+        harga_beli_kode=req.harga_beli_kode or harga_encode(req.harga_modal),
         harga_jual=harga_jual,
         stok_minimum=req.stok_minimum,
         satuan=req.satuan,
@@ -162,6 +164,7 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
     if req.kategori_id is not None: b.kategori_id = req.kategori_id
     if req.supplier_id is not None: b.supplier_id = req.supplier_id
     if req.harga_modal is not None: b.harga_modal = req.harga_modal
+    if req.harga_beli_kode is not None: b.harga_beli_kode = req.harga_beli_kode
     if req.harga_jual_kode is not None: b.harga_jual = harga_decode(req.harga_jual_kode)
     if req.stok_minimum is not None: b.stok_minimum = req.stok_minimum
     if req.satuan is not None: b.satuan = req.satuan

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
@@ -9,8 +9,19 @@ class BarangCreate(BaseModel):
     kategori_id: Optional[int] = None
     supplier_id: Optional[int] = None
     harga_modal: int = 0
+    harga_beli_kode: Optional[str] = Field(default=None, max_length=50)
     harga_jual_kode: str = "P"
     stok_minimum: int = 5
+
+    @field_validator("harga_beli_kode")
+    @classmethod
+    def strip_buy_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("buy code must not be blank")
+        return normalized
     satuan: str = "pcs"
     deskripsi: Optional[str] = None
     foto: Optional[str] = None
@@ -23,8 +34,19 @@ class BarangUpdate(BaseModel):
     kategori_id: Optional[int] = None
     supplier_id: Optional[int] = None
     harga_modal: Optional[int] = None
+    harga_beli_kode: Optional[str] = Field(default=None, max_length=50)
     harga_jual_kode: Optional[str] = None
     stok_minimum: Optional[int] = None
+
+    @field_validator("harga_beli_kode")
+    @classmethod
+    def strip_buy_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("buy code must not be blank")
+        return normalized
     satuan: Optional[str] = None
     deskripsi: Optional[str] = None
     foto: Optional[str] = None
@@ -60,6 +82,7 @@ class BarangOut(BaseModel):
     kategori: Optional[KategoriRef] = None
     supplier: Optional[SupplierRef] = None
     harga_modal: int = 0
+    harga_beli_kode: str = ""
     harga_jual: int = 0
     harga_jual_kode: str = ""
     stok_minimum: int = 5

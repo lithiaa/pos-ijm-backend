@@ -14,6 +14,7 @@ class Barang(Base):
     kategori_id = Column(Integer, ForeignKey("kategori.id"), nullable=True)
     supplier_id = Column(Integer, ForeignKey("supplier.id"), nullable=True)
     harga_modal = Column(Integer, default=0)
+    harga_beli_kode = Column(String(50), nullable=True)
     harga_jual = Column(Integer, default=0)
     stok_minimum = Column(Integer, default=5)
     satuan = Column(String(20), default="pcs")

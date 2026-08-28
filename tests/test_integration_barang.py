@@ -6,7 +6,6 @@ from app.models.transaksi import (
     StokSaatIni,
     TransaksiStok,
 )
-from app.services.harga import harga_encode
 from tests.conftest import TEST_INTEGRATION_KEY
 
 
@@ -25,6 +24,7 @@ def create_payload(**overrides):
         "sku": "OIL-001",
         "nama": "Oil Filter",
         "harga_beli": 45_000,
+        "harga_beli_kode": "MANUAL-X9",
         "harga_jual": 60_000,
         "jumlah_barang_masuk": 0,
         "operation_id": CREATE_OPERATION_ID,
@@ -39,6 +39,7 @@ def add_barang(
     sku="PART-001",
     nama="Brake Pad",
     harga_beli=125_000,
+    harga_beli_kode="STORED-BUY-CODE",
     harga_jual=175_000,
     stok=7,
     satuan="box",
@@ -47,6 +48,7 @@ def add_barang(
         sku=sku,
         nama=nama,
         harga_modal=harga_beli,
+        harga_beli_kode=harga_beli_kode,
         harga_jual=harga_jual,
         satuan=satuan,
     )
@@ -90,7 +92,7 @@ def test_get_by_sku_normalizes_input_and_returns_full_item(client, db):
         "nama": "Brake Pad",
         "harga_beli": 125_000,
         "harga_jual": 175_000,
-        "harga_beli_kode": harga_encode(125_000),
+        "harga_beli_kode": "STORED-BUY-CODE",
         "stok": 7,
         "satuan": "box",
     }
@@ -125,7 +127,7 @@ def test_search_returns_matching_item_with_integration_output(client, db):
                 "nama": "Oil Filter",
                 "harga_beli": 125_000,
                 "harga_jual": 175_000,
-                "harga_beli_kode": harga_encode(125_000),
+                "harga_beli_kode": "STORED-BUY-CODE",
                 "stok": 9,
                 "satuan": "box",
             }
@@ -298,13 +300,14 @@ def test_post_with_zero_quantity_creates_item_without_stock_transaction(client, 
         "nama": "Oil Filter",
         "harga_beli": 45_000,
         "harga_jual": 60_000,
-        "harga_beli_kode": harga_encode(45_000),
+        "harga_beli_kode": "MANUAL-X9",
         "stok": 0,
         "satuan": "pcs",
     }
 
     barang = db.query(Barang).filter(Barang.sku == "OIL-001").one()
     assert barang.harga_modal == 45_000
+    assert barang.harga_beli_kode == "MANUAL-X9"
     assert barang.harga_jual == 60_000
     assert barang.satuan == "pcs"
     assert barang.stok is not None
@@ -383,6 +386,7 @@ def test_existing_sku_stock_endpoint_atomically_increments_and_records_transacti
 
     assert response.status_code == 200
     assert response.json()["id"] == barang.id
+    assert response.json()["harga_beli_kode"] == "STORED-BUY-CODE"
     assert response.json()["stok"] == 12
     db.expire_all()
     assert db.query(Barang).filter(Barang.id == barang.id).one().stok.jumlah == 12
@@ -468,7 +472,7 @@ def test_existing_sku_different_operation_ids_both_apply(client, db):
     assert db.query(TransaksiStok).count() == 2
 
 
-def test_put_by_sku_updates_name_and_both_numeric_prices(client, db):
+def test_put_by_sku_updates_buy_code_independently(client, db):
     barang = add_barang(db, sku="UPDATE-1", nama="Old Name")
 
     response = client.put(
@@ -477,6 +481,7 @@ def test_put_by_sku_updates_name_and_both_numeric_prices(client, db):
         json={
             "nama": "  New Name  ",
             "harga_beli": 222_000,
+            "harga_beli_kode": "  UPDATED-MANUAL  ",
             "harga_jual": 275_000,
         },
     )
@@ -488,7 +493,7 @@ def test_put_by_sku_updates_name_and_both_numeric_prices(client, db):
         "nama": "New Name",
         "harga_beli": 222_000,
         "harga_jual": 275_000,
-        "harga_beli_kode": harga_encode(222_000),
+        "harga_beli_kode": "UPDATED-MANUAL",
         "stok": 7,
         "satuan": "box",
     }
@@ -497,9 +502,67 @@ def test_put_by_sku_updates_name_and_both_numeric_prices(client, db):
     updated = db.query(Barang).filter(Barang.sku == "UPDATE-1").one()
     assert updated.nama == "New Name"
     assert updated.harga_modal == 222_000
+    assert updated.harga_beli_kode == "UPDATED-MANUAL"
     assert updated.harga_jual == 275_000
     assert updated.stok.jumlah == 7
     assert db.query(TransaksiStok).count() == 0
+
+
+def test_put_by_sku_omits_buy_code_and_preserves_existing_value(client, db):
+    add_barang(db, sku="UPDATE-OLD-ANDROID", harga_beli_kode="KEEP-ME")
+
+    response = client.put(
+        f"{BASE_URL}/by-sku/UPDATE-OLD-ANDROID",
+        headers=AUTH_HEADERS,
+        json={
+            "nama": "Updated by old Android",
+            "harga_beli": 333_000,
+            "harga_jual": 444_000,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["harga_beli_kode"] == "KEEP-ME"
+    db.expire_all()
+    updated = db.query(Barang).filter(Barang.sku == "UPDATE-OLD-ANDROID").one()
+    assert updated.harga_modal == 333_000
+    assert updated.harga_beli_kode == "KEEP-ME"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "removed_field"),
+    [
+        ({"harga_beli_kode": "   "}, None),
+        ({"harga_beli_kode": "X" * 51}, None),
+        ({}, "harga_beli_kode"),
+    ],
+)
+def test_post_requires_valid_buy_code(client, overrides, removed_field):
+    payload = create_payload(**overrides)
+    if removed_field:
+        payload.pop(removed_field)
+
+    response = client.post(BASE_URL, headers=AUTH_HEADERS, json=payload)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("harga_beli_kode", ["   ", "X" * 51])
+def test_put_rejects_invalid_supplied_buy_code(client, db, harga_beli_kode):
+    add_barang(db, sku="UPDATE-INVALID", harga_beli_kode="KEEP-ME")
+
+    response = client.put(
+        f"{BASE_URL}/by-sku/UPDATE-INVALID",
+        headers=AUTH_HEADERS,
+        json={
+            "nama": "Still valid",
+            "harga_beli": 123,
+            "harga_jual": 456,
+            "harga_beli_kode": harga_beli_kode,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_metadata_conflict_does_not_modify_existing_stock(client, db):

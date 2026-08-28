@@ -245,18 +245,20 @@ Contoh payload `POST`:
   "sku": "OIL-001",
   "nama": "Oil Filter",
   "harga_beli": 45000,
+  "harga_beli_kode": "MANUAL-X9",
   "harga_jual": 60000,
   "jumlah_barang_masuk": 10,
   "operation_id": "b71d24f8-24a8-4e79-8c3c-e330807ca8ec"
 }
 ```
 
-`jumlah_barang_masuk` adalah integer wajib minimal `0`; jumlah label cetak tidak
-termasuk payload POS. `operation_id` adalah UUID wajib dan harus unik untuk
-setiap submit. Retry dengan UUID yang sama tidak menambah stok dua kali.
-`satuan` tetap opsional dengan nilai default `"pcs"`. Respons menyertakan stok
-terkini, harga numerik, dan `harga_beli_kode` yang dibentuk dengan kode harga
-SANGUOERIP.
+`harga_beli_kode` adalah string wajib (maksimal 50 karakter) yang diisi POS
+secara manual dan tidak harus berkaitan dengan `harga_beli`. `jumlah_barang_masuk`
+adalah integer wajib minimal `0`; jumlah label cetak tidak termasuk payload POS.
+`operation_id` adalah UUID wajib dan harus unik untuk setiap submit. Retry dengan
+UUID yang sama tidak menambah stok dua kali. `satuan` tetap opsional dengan nilai
+default `"pcs"`. Respons menyertakan stok terkini, harga numerik, dan kode beli
+tersimpan.
 
 Contoh payload stok masuk untuk barang yang sudah ada:
 

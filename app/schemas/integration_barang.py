@@ -9,6 +9,7 @@ class IntegrationBarangCreate(BaseModel):
     sku: str = Field(min_length=1, max_length=50)
     nama: str = Field(min_length=1, max_length=200)
     harga_beli: StrictInt = Field(ge=0)
+    harga_beli_kode: str = Field(max_length=50)
     harga_jual: StrictInt = Field(ge=0)
     jumlah_barang_masuk: StrictInt = Field(ge=0)
     operation_id: UUID
@@ -22,7 +23,7 @@ class IntegrationBarangCreate(BaseModel):
             raise ValueError("SKU must not be blank")
         return normalized
 
-    @field_validator("nama", "satuan")
+    @field_validator("nama", "satuan", "harga_beli_kode")
     @classmethod
     def strip_non_blank_text(cls, value: str) -> str:
         normalized = value.strip()
@@ -36,11 +37,14 @@ class IntegrationBarangUpdate(BaseModel):
 
     nama: str = Field(min_length=1, max_length=200)
     harga_beli: StrictInt = Field(ge=0)
+    harga_beli_kode: str | None = Field(default=None, max_length=50)
     harga_jual: StrictInt = Field(ge=0)
 
-    @field_validator("nama")
+    @field_validator("nama", "harga_beli_kode")
     @classmethod
-    def strip_non_blank_name(cls, value: str) -> str:
+    def strip_non_blank_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not normalized:
             raise ValueError("name must not be blank")
