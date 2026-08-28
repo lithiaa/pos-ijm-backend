@@ -1,7 +1,11 @@
 import pytest
 
 from app.models.barang import Barang
-from app.models.transaksi import StokSaatIni, TransaksiStok
+from app.models.transaksi import (
+    IntegrationStockOperation,
+    StokSaatIni,
+    TransaksiStok,
+)
 from app.services.harga import harga_encode
 from tests.conftest import TEST_INTEGRATION_KEY
 
@@ -100,6 +104,183 @@ def test_get_by_sku_requires_an_exact_normalized_match(client, db):
 
     assert partial.status_code == 404
     assert missing.status_code == 404
+
+
+def test_search_returns_matching_item_with_integration_output(client, db):
+    barang = add_barang(db, sku="FILTER-001", nama="Oil Filter", stok=9)
+    add_barang(db, sku="BRAKE-001", nama="Brake Pad")
+
+    response = client.get(
+        f"{BASE_URL}/search",
+        headers=AUTH_HEADERS,
+        params={"q": "Filter"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "data": [
+            {
+                "id": barang.id,
+                "sku": "FILTER-001",
+                "nama": "Oil Filter",
+                "harga_beli": 125_000,
+                "harga_jual": 175_000,
+                "harga_beli_kode": harga_encode(125_000),
+                "stok": 9,
+                "satuan": "box",
+            }
+        ]
+    }
+
+
+def test_search_is_case_insensitive_and_ranks_name_before_sku(client, db):
+    exact = add_barang(db, sku="EXACT-SKU", nama="Oil Filter")
+    prefix = add_barang(db, sku="PREFIX-SKU", nama="Oil Filter Premium")
+    contains = add_barang(db, sku="CONTAINS-SKU", nama="Premium Oil Filter")
+    sku_only = add_barang(db, sku="OIL FILTER SKU", nama="Unrelated")
+
+    response = client.get(
+        f"{BASE_URL}/search",
+        headers=AUTH_HEADERS,
+        params={"q": "  oIL fiLTeR  "},
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["data"]] == [
+        exact.id,
+        prefix.id,
+        contains.id,
+        sku_only.id,
+    ]
+
+
+def test_search_ties_sort_by_lower_name_then_id(client, db):
+    second_same_name = add_barang(db, sku="SAME-2", nama="Part Beta")
+    first_same_name = add_barang(db, sku="SAME-1", nama="Part Beta")
+    alpha = add_barang(db, sku="ALPHA", nama="Part Alpha")
+
+    response = client.get(
+        f"{BASE_URL}/search", headers=AUTH_HEADERS, params={"q": "part"}
+    )
+
+    assert [item["id"] for item in response.json()["data"]] == [
+        alpha.id,
+        second_same_name.id,
+        first_same_name.id,
+    ]
+
+
+@pytest.mark.parametrize("q", [None, "", "   ", "x", " x "])
+def test_search_missing_blank_or_short_query_returns_empty(client, db, q):
+    add_barang(db)
+    params = {} if q is None else {"q": q}
+
+    response = client.get(f"{BASE_URL}/search", headers=AUTH_HEADERS, params=params)
+
+    assert response.status_code == 200
+    assert response.json() == {"data": []}
+
+
+def test_search_requires_integration_key(client):
+    response = client.get(f"{BASE_URL}/search", params={"q": "part"})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Unauthorized"}
+
+
+def test_search_default_and_explicit_limits_apply_after_ranking(client, db):
+    for index in range(12):
+        add_barang(db, sku=f"PART-{index:02}", nama=f"Part {index:02}")
+
+    default = client.get(
+        f"{BASE_URL}/search", headers=AUTH_HEADERS, params={"q": "part"}
+    )
+    explicit = client.get(
+        f"{BASE_URL}/search",
+        headers=AUTH_HEADERS,
+        params={"q": "part", "limit": 20},
+    )
+    one = client.get(
+        f"{BASE_URL}/search",
+        headers=AUTH_HEADERS,
+        params={"q": "part", "limit": 1},
+    )
+
+    assert len(default.json()["data"]) == 10
+    assert len(explicit.json()["data"]) == 12
+    assert len(one.json()["data"]) == 1
+    assert one.json()["data"][0]["nama"] == "Part 00"
+
+
+@pytest.mark.parametrize("limit", [0, 21])
+def test_search_rejects_out_of_bounds_limit(client, limit):
+    response = client.get(
+        f"{BASE_URL}/search",
+        headers=AUTH_HEADERS,
+        params={"q": "part", "limit": limit},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("query", "matching_sku"),
+    [("%", "PERCENT"), ("_", "UNDERSCORE"), ("\\", "BACKSLASH")],
+)
+def test_search_treats_sql_like_wildcards_as_literals(client, db, query, matching_sku):
+    add_barang(db, sku="PERCENT", nama="Rate 100% Genuine")
+    add_barang(db, sku="UNDERSCORE", nama="Part_A")
+    add_barang(db, sku="BACKSLASH", nama=r"Path\\Part")
+    add_barang(db, sku="PLAIN", nama="Plain Part")
+
+    response = client.get(
+        f"{BASE_URL}/search", headers=AUTH_HEADERS, params={"q": query * 2}
+    )
+
+    assert response.status_code == 200
+    expected = [] if query != "\\" else [matching_sku]
+    assert [item["sku"] for item in response.json()["data"]] == expected
+
+
+def test_search_literal_percent_and_underscore_match_when_query_length_is_two(client, db):
+    add_barang(db, sku="PERCENT", nama="Rate %% Genuine")
+    add_barang(db, sku="UNDERSCORE", nama="Part__A")
+    add_barang(db, sku="PLAIN", nama="Plain Part")
+
+    percent = client.get(
+        f"{BASE_URL}/search", headers=AUTH_HEADERS, params={"q": "%%"}
+    )
+    underscore = client.get(
+        f"{BASE_URL}/search", headers=AUTH_HEADERS, params={"q": "__"}
+    )
+
+    assert [item["sku"] for item in percent.json()["data"]] == ["PERCENT"]
+    assert [item["sku"] for item in underscore.json()["data"]] == ["UNDERSCORE"]
+
+
+def test_openapi_keeps_five_integration_paths_and_search_response_schema(client):
+    paths = client.get("/openapi.json").json()["paths"]
+
+    assert {
+        BASE_URL,
+        f"{BASE_URL}/search",
+        f"{BASE_URL}/by-sku/{{sku}}",
+        f"{BASE_URL}/by-sku/{{sku}}/stok-masuk",
+        "/api/barang",
+    }.issubset(paths)
+    schema = paths[f"{BASE_URL}/search"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert schema == {
+        "$ref": "#/components/schemas/IntegrationBarangSearchResponse"
+    }
+    response_schema = client.get("/openapi.json").json()["components"]["schemas"][
+        "IntegrationBarangSearchResponse"
+    ]
+    assert response_schema["required"] == ["data"]
+    assert response_schema["properties"]["data"]["items"] == {
+        "$ref": "#/components/schemas/IntegrationBarangOut"
+    }
 
 
 def test_post_with_zero_quantity_creates_item_without_stock_transaction(client, db):
@@ -236,6 +417,35 @@ def test_existing_sku_stock_retry_is_noop_and_returns_same_current_stock(client,
     db.expire_all()
     assert db.query(Barang).filter(Barang.sku == "RETRY-1").one().stok.jumlah == 5
     assert db.query(TransaksiStok).count() == 1
+
+
+def test_existing_sku_zero_quantity_retry_records_operation_once(client, db):
+    barang = add_barang(db, sku="ZERO-RETRY", stok=3)
+    payload = {
+        "jumlah_barang_masuk": 0,
+        "harga_satuan": 50_000,
+        "operation_id": CREATE_OPERATION_ID,
+    }
+
+    first = client.post(
+        f"{BASE_URL}/by-sku/ZERO-RETRY/stok-masuk",
+        headers=AUTH_HEADERS,
+        json=payload,
+    )
+    retry = client.post(
+        f"{BASE_URL}/by-sku/ZERO-RETRY/stok-masuk",
+        headers=AUTH_HEADERS,
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert retry.status_code == 200
+    assert first.json()["stok"] == 3
+    assert retry.json() == first.json()
+    db.expire_all()
+    assert db.query(Barang).filter(Barang.id == barang.id).one().stok.jumlah == 3
+    assert db.query(TransaksiStok).count() == 0
+    assert db.query(IntegrationStockOperation).count() == 1
 
 
 def test_existing_sku_different_operation_ids_both_apply(client, db):

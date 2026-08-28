@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import update
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import case, func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -14,6 +14,7 @@ from app.models.transaksi import (
 from app.schemas.integration_barang import (
     IntegrationBarangCreate,
     IntegrationBarangOut,
+    IntegrationBarangSearchResponse,
     IntegrationBarangUpdate,
     IntegrationStokMasuk,
 )
@@ -65,6 +66,10 @@ def _keterangan(operation_id: str) -> str:
     return f"{INTEGRATION_KETERANGAN_PREFIX}{operation_id}"
 
 
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _get_operation_barang(
     db: Session,
     operation_id: str,
@@ -109,6 +114,45 @@ def _add_stock_transaction(
             keterangan=_keterangan(operation_id),
             user_id=None,
         )
+    )
+
+
+@router.get("/search", response_model=IntegrationBarangSearchResponse)
+def search_integration_barang(
+    q: str | None = None,
+    limit: int = Query(default=10, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    query = (q or "").strip()
+    if len(query) < 2:
+        return IntegrationBarangSearchResponse(data=[])
+
+    literal = _escape_like(query.lower())
+    contains = f"%{literal}%"
+    prefix = f"{literal}%"
+    lower_name = func.lower(Barang.nama)
+    lower_sku = func.lower(Barang.sku)
+    rank = case(
+        (lower_name == query.lower(), 0),
+        (lower_name.like(prefix, escape="\\"), 1),
+        (lower_name.like(contains, escape="\\"), 2),
+        else_=3,
+    )
+    barang = (
+        db.query(Barang)
+        .options(joinedload(Barang.stok))
+        .filter(
+            or_(
+                lower_name.like(contains, escape="\\"),
+                lower_sku.like(contains, escape="\\"),
+            )
+        )
+        .order_by(rank, lower_name, Barang.id)
+        .limit(limit)
+        .all()
+    )
+    return IntegrationBarangSearchResponse(
+        data=[_to_integration_out(item) for item in barang]
     )
 
 

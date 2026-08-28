@@ -64,3 +64,7 @@ class IntegrationBarangOut(BaseModel):
     harga_beli_kode: str
     stok: int
     satuan: str
+
+
+class IntegrationBarangSearchResponse(BaseModel):
+    data: list[IntegrationBarangOut]
