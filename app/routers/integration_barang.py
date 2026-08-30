@@ -11,6 +11,7 @@ from app.database import get_db
 from app.integration_auth import require_integration_key
 from app.models.barang import Barang
 from app.models.kategori import Kategori
+from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import (
     IntegrationStockOperation,
@@ -579,6 +580,11 @@ def delete_integration_barang(
     barang = _get_by_id(db, barang_id)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
+    if db.query(PrintJob.id).filter(PrintJob.barang_id == barang_id).first():
+        raise HTTPException(
+            status_code=409,
+            detail="Barang has print jobs and cannot be deleted",
+        )
     old_photo = barang.foto
 
     try:
@@ -595,6 +601,14 @@ def delete_integration_barang(
             synchronize_session=False
         )
         db.commit()
+    except IntegrityError:
+        db.rollback()
+        if db.query(PrintJob.id).filter(PrintJob.barang_id == barang_id).first():
+            raise HTTPException(
+                status_code=409,
+                detail="Barang has print jobs and cannot be deleted",
+            )
+        raise
     except Exception:
         db.rollback()
         raise

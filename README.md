@@ -187,7 +187,7 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 
 ## API Endpoint
 
-> Semua endpoint (kecuali login) membutuhkan header: `Authorization: Bearer <token>`
+> Endpoint reguler `/api` (kecuali login) memakai header `Authorization: Bearer <token>`, sedangkan endpoint `/api/integration` memakai header `X-Integration-Key`.
 
 ### 🔐 Autentikasi
 
@@ -236,7 +236,7 @@ dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 | `GET` | `/api/integration/barang/meta` | Daftar kategori, supplier, dan satuan untuk form mobile |
 | `GET` | `/api/integration/barang/{id}` | Detail barang berdasarkan ID |
 | `PUT` | `/api/integration/barang/{id}` | Ubah sebagian metadata barang; field yang tidak dikirim tetap |
-| `DELETE` | `/api/integration/barang/{id}` | Hapus barang beserta riwayat stok dan record idempotensi terkait |
+| `DELETE` | `/api/integration/barang/{id}` | Hapus barang beserta riwayat stok dan record idempotensi terkait; HTTP 409 jika ada riwayat cetak |
 | `POST` | `/api/integration/barang/{id}/foto` | Unggah/ganti foto barang |
 | `GET` | `/api/integration/barang/search?q=...` | Pencarian ringkas lama berdasarkan nama/SKU |
 | `GET` | `/api/integration/barang/by-sku/{sku}` | Detail lama berdasarkan SKU persis |
@@ -319,7 +319,10 @@ Contoh stok masuk:
 `operation_id` wajib berupa UUID unik; retry UUID sama tidak menambah stok dua
 kali. Upload foto memakai multipart field `file`, maksimal 5 MiB, dengan tipe
 JPEG, PNG, atau WebP. Nama file dibuat server. Penghapusan barang juga menghapus
-riwayat stok dan record idempotensi terkait dalam transaksi yang sama.
+riwayat stok dan record idempotensi terkait dalam transaksi yang sama. Jika barang
+memiliki riwayat cetak (`PrintJob`), penghapusan ditolak dengan HTTP 409; barang,
+riwayat stok, dan foto tetap tersimpan. Pengguna harus mempertahankan riwayat cetak
+tersebut.
 
 **Query params untuk GET `/api/barang`:**
 

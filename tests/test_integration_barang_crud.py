@@ -1,10 +1,13 @@
+from app.database import SessionLocal
 from app.models.barang import Barang
 from app.models.kategori import Kategori
+from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import IntegrationStockOperation, StokSaatIni, TransaksiStok
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from tests.conftest import TEST_INTEGRATION_KEY
 
@@ -423,6 +426,88 @@ def test_delete_requires_auth_cleans_dependencies_file_and_preserves_unrelated(
     assert db.query(IntegrationStockOperation).filter_by(barang_id=other_id).count() == 1
     assert not (tmp_path / "target.jpg").exists()
     assert client.delete(f"{BASE_URL}/{target_id}", headers=AUTH_HEADERS).status_code == 404
+
+
+def test_delete_rejects_print_history_without_partial_cleanup(
+    client, db, tmp_path, monkeypatch
+):
+    from app.routers import integration_barang
+
+    monkeypatch.setattr(integration_barang, "STORAGE_DIR", str(tmp_path))
+    barang = add_barang(db, sku="PRINTED", foto="printed.jpg")
+    (tmp_path / "printed.jpg").write_bytes(b"photo")
+    transaction = TransaksiStok(barang_id=barang.id, jenis="masuk", jumlah=1)
+    operation = IntegrationStockOperation(
+        operation_id=str(uuid4()), barang_id=barang.id
+    )
+    print_job = PrintJob(barang_id=barang.id, qty=1, status="printed")
+    db.add_all([transaction, operation, print_job])
+    db.commit()
+
+    barang_id = barang.id
+    transaction_id = transaction.id
+    operation_id = operation.operation_id
+    print_job_id = print_job.id
+    response = client.delete(f"{BASE_URL}/{barang_id}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Barang has print jobs and cannot be deleted"
+    db.expire_all()
+    assert db.get(Barang, barang_id) is not None
+    assert db.get(PrintJob, print_job_id) is not None
+    assert db.query(StokSaatIni).filter_by(barang_id=barang_id).count() == 1
+    assert db.get(TransaksiStok, transaction_id) is not None
+    assert db.get(IntegrationStockOperation, operation_id) is not None
+    assert (tmp_path / "printed.jpg").read_bytes() == b"photo"
+
+
+def test_delete_concurrent_print_job_conflict_rolls_back_and_keeps_photo(
+    client, db, tmp_path, monkeypatch
+):
+    from app.routers import integration_barang
+
+    monkeypatch.setattr(integration_barang, "STORAGE_DIR", str(tmp_path))
+    barang = add_barang(db, sku="PRINT-RACE", foto="race.jpg")
+    (tmp_path / "race.jpg").write_bytes(b"photo")
+    transaction = TransaksiStok(barang_id=barang.id, jenis="masuk", jumlah=1)
+    operation = IntegrationStockOperation(
+        operation_id=str(uuid4()), barang_id=barang.id
+    )
+    db.add_all([transaction, operation])
+    db.commit()
+
+    barang_id = barang.id
+    transaction_id = transaction.id
+    operation_id = operation.operation_id
+    original_commit = type(db).commit
+
+    def add_print_job_then_fail(_session):
+        _session.rollback()
+        monkeypatch.setattr(type(db), "commit", original_commit)
+        concurrent_db = SessionLocal()
+        try:
+            concurrent_db.add(PrintJob(barang_id=barang_id, qty=1, status="pending"))
+            concurrent_db.commit()
+        finally:
+            concurrent_db.close()
+        raise IntegrityError(
+            "DELETE FROM barang",
+            {},
+            Exception("FOREIGN KEY constraint failed: print_jobs.barang_id"),
+        )
+
+    monkeypatch.setattr(type(db), "commit", add_print_job_then_fail)
+    response = client.delete(f"{BASE_URL}/{barang_id}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Barang has print jobs and cannot be deleted"
+    db.expire_all()
+    assert db.get(Barang, barang_id) is not None
+    assert db.query(PrintJob).filter_by(barang_id=barang_id).count() == 1
+    assert db.query(StokSaatIni).filter_by(barang_id=barang_id).count() == 1
+    assert db.get(TransaksiStok, transaction_id) is not None
+    assert db.get(IntegrationStockOperation, operation_id) is not None
+    assert (tmp_path / "race.jpg").read_bytes() == b"photo"
 
 
 def test_delete_uses_basename_for_photo_cleanup(client, db, tmp_path, monkeypatch):
