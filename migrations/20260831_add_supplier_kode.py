@@ -35,22 +35,51 @@ def migrate(database_url: str = DATABASE_URL) -> dict[str, int]:
                 counts["columns_added"] = 1
 
             rows = connection.execute(
-                text(
-                    "SELECT id FROM supplier "
-                    "WHERE kode_supplier IS NULL OR TRIM(kode_supplier) = '' "
-                    "ORDER BY id"
-                )
+                text("SELECT id, kode_supplier FROM supplier ORDER BY id")
             ).all()
+            proposed = {}
             for row in rows:
-                result = connection.execute(
-                    text(
-                        "UPDATE supplier SET kode_supplier = :code "
-                        "WHERE id = :id AND "
-                        "(kode_supplier IS NULL OR TRIM(kode_supplier) = '')"
-                    ),
-                    {"code": f"SUP-{row.id:03d}", "id": row.id},
+                normalized = (
+                    row.kode_supplier.strip().upper()
+                    if row.kode_supplier and row.kode_supplier.strip()
+                    else f"SUP-{row.id:03d}"
                 )
-                counts["rows_backfilled"] += result.rowcount
+                proposed.setdefault(normalized, []).append(
+                    (row.id, row.kode_supplier, normalized)
+                )
+
+            conflicts = [owners for owners in proposed.values() if len(owners) > 1]
+            if conflicts:
+                details = "; ".join(
+                    ", ".join(
+                        f"id={supplier_id} code={original!r} normalized={normalized!r}"
+                        for supplier_id, original, normalized in owners
+                    )
+                    for owners in conflicts
+                )
+                raise RuntimeError(f"Supplier code conflicts: {details}")
+
+            for row in rows:
+                if row.kode_supplier and row.kode_supplier.strip():
+                    normalized = row.kode_supplier.strip().upper()
+                    if normalized != row.kode_supplier:
+                        connection.execute(
+                            text(
+                                "UPDATE supplier SET kode_supplier = :code "
+                                "WHERE id = :id"
+                            ),
+                            {"code": normalized, "id": row.id},
+                        )
+                else:
+                    result = connection.execute(
+                        text(
+                            "UPDATE supplier SET kode_supplier = :code "
+                            "WHERE id = :id AND "
+                            "(kode_supplier IS NULL OR TRIM(kode_supplier) = '')"
+                        ),
+                        {"code": f"SUP-{row.id:03d}", "id": row.id},
+                    )
+                    counts["rows_backfilled"] += result.rowcount
 
             inspector = inspect(connection)
             indexes = inspector.get_indexes("supplier")

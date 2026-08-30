@@ -13,6 +13,7 @@ from app.models.transaksi import StokSaatIni, TransaksiStok
 from app.models.kategori import Kategori
 from app.models.supplier import Supplier
 from app.services.harga import harga_decode, harga_encode
+from app.services.supplier_code import assign_supplier_code
 from app.services.print_client import print_job_async
 from app.routers.upload import STORAGE_DIR as FOTO_STORAGE_DIR
 
@@ -82,7 +83,7 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                 if not supplier:
                     supplier = Supplier(nama=params["supplier"])
                     db.add(supplier)
-                    db.flush()
+                    assign_supplier_code(db, supplier)
 
             # Handle SANGUOERIP price code
             harga_jual_str = params.get("harga_jual", "0")
@@ -233,7 +234,7 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                     if not sup:
                         sup = Supplier(nama=val)
                         db.add(sup)
-                        db.flush()
+                        assign_supplier_code(db, sup)
                     setattr(barang, "supplier_id", sup.id)
                 elif key == "foto":
                     setattr(barang, key, val)

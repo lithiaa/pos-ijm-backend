@@ -28,7 +28,10 @@ def _barang_to_out(b: Barang) -> BarangOut:
 
     sup_out = None
     if b.supplier:
-        sup_out = SupplierOut(id=b.supplier.id, nama=b.supplier.nama,
+        sup_out = SupplierOut(id=b.supplier.id,
+                              kode_supplier=b.supplier.kode_supplier,
+                              nama=b.supplier.nama,
+                              nama_supplier=b.supplier.nama,
                               kontak=b.supplier.kontak, telepon=b.supplier.telepon,
                               email=b.supplier.email, jumlah_barang=0)
 

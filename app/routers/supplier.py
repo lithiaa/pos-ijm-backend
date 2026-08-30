@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models.barang import Barang
 from app.models.supplier import Supplier
 from app.schemas.supplier import SupplierCreate, SupplierOut, SupplierUpdate
+from app.services.supplier_code import assign_supplier_code
 
 router = APIRouter(prefix="/api/supplier", tags=["supplier"])
 
@@ -62,9 +63,8 @@ def create_supplier(
     )
     db.add(supplier)
     try:
-        db.flush()
         if supplier.kode_supplier is None:
-            supplier.kode_supplier = f"SUP-{supplier.id:03d}"
+            assign_supplier_code(db, supplier)
         db.commit()
     except IntegrityError:
         db.rollback()

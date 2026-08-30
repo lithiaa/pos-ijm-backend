@@ -5,8 +5,10 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 
 from app.auth import create_access_token
+from app.models.barang import Barang
 from app.models.supplier import Supplier
 from app.models.user import User
+from app.services.harga import harga_encode
 from tests.conftest import TEST_INTEGRATION_KEY
 
 
@@ -139,6 +141,54 @@ def test_supplier_create_old_payload_generates_code_and_preserves_legacy_fields(
     assert body["email"] == "buyer@example.test"
 
 
+def test_supplier_create_old_payload_skips_occupied_generated_code(client, db):
+    add_supplier(db, kode_supplier="SUP-002", nama="Occupied")
+
+    response = client.post(
+        SUPPLIER_URL,
+        headers=bearer_headers(db),
+        json={"nama": "Legacy Collision"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == 2
+    assert response.json()["kode_supplier"] == "SUP-003"
+
+
+def test_chatbot_create_barang_assigns_code_to_new_supplier_without_output_change(
+    client, db
+):
+    response = client.post(
+        "/api/chatbot/",
+        json={"command": "tambah barang nama=Chat Part supplier=Chat Vendor"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"response": "✅ Berhasil tambah barang: Chat Part (ID: 1)"}
+    supplier = db.query(Supplier).filter(Supplier.nama == "Chat Vendor").one()
+    assert supplier.kode_supplier == f"SUP-{supplier.id:03d}"
+
+
+def test_chatbot_update_barang_assigns_code_to_new_supplier_without_output_change(
+    client, db
+):
+    barang = Barang(sku="CHAT-UPDATE", nama="Before", harga_jual=0)
+    db.add(barang)
+    db.commit()
+
+    response = client.post(
+        "/api/chatbot/",
+        json={
+            "command": f"ubah barang id={barang.id} supplier=Update Chat Vendor"
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"response": f"✅ Berhasil ubah barang ID {barang.id}."}
+    supplier = db.query(Supplier).filter(Supplier.nama == "Update Chat Vendor").one()
+    assert supplier.kode_supplier == f"SUP-{supplier.id:03d}"
+
+
 def test_supplier_create_normalizes_explicit_code(client, db):
     response = client.post(
         SUPPLIER_URL,
@@ -266,6 +316,67 @@ def test_supplier_out_list_handles_legacy_null_code_and_adds_name_alias(client, 
     ]
 
 
+@pytest.mark.parametrize("kode_supplier", ["VENDOR-9", None])
+def test_barang_list_serializes_supplier_code_name_and_old_fields(
+    client, db, kode_supplier
+):
+    supplier = add_supplier(
+        db,
+        kode_supplier=kode_supplier,
+        nama="Route Supplier",
+        kontak="Contact",
+        telepon="555",
+        email="route@example.test",
+    )
+    barang = Barang(
+        sku=f"ROUTE-{supplier.id}",
+        nama="Route Item",
+        supplier_id=supplier.id,
+        harga_modal=10_000,
+        harga_beli_kode="BUY-CODE",
+        harga_jual=15_000,
+        stok_minimum=2,
+        satuan="box",
+        deskripsi="Kept",
+        foto="route.jpg",
+    )
+    db.add(barang)
+    db.commit()
+
+    response = client.get("/api/barang", headers=bearer_headers(db))
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["supplier"] == {
+        "id": supplier.id,
+        "kode_supplier": kode_supplier,
+        "nama": "Route Supplier",
+        "nama_supplier": "Route Supplier",
+        "kontak": "Contact",
+        "telepon": "555",
+        "email": "route@example.test",
+        "jumlah_barang": 0,
+    }
+    assert response.json()["data"][0] | {"created_at": None} == {
+        "id": barang.id,
+        "sku": f"ROUTE-{supplier.id}",
+        "nama": "Route Item",
+        "merek": None,
+        "kategori": None,
+        "supplier": response.json()["data"][0]["supplier"],
+        "harga_modal": 10_000,
+        "harga_beli_kode": "BUY-CODE",
+        "harga_jual": 15_000,
+        "harga_jual_kode": harga_encode(15_000),
+        "stok_minimum": 2,
+        "satuan": "box",
+        "deskripsi": "Kept",
+        "foto": "route.jpg",
+        "stok": 0,
+        "status": "Habis",
+        "created_at": None,
+    }
+
+
 def test_barang_meta_adds_supplier_code_and_name_without_removing_old_fields(client, db):
     supplier = add_supplier(
         db,
@@ -306,37 +417,62 @@ def load_supplier_migration():
     return module
 
 
-def test_supplier_migration_is_idempotent_and_enforces_unique_code_on_sqlite(tmp_path):
-    database_url = f"sqlite:///{tmp_path / 'legacy.db'}"
-    engine = create_engine(database_url)
+def create_legacy_supplier_table(engine, rows, *, with_code=True):
+    code_column = ", kode_supplier VARCHAR(50)" if with_code else ""
     with engine.begin() as connection:
         connection.execute(
             text(
                 "CREATE TABLE supplier ("
-                "id INTEGER PRIMARY KEY, nama VARCHAR(150), kontak VARCHAR(100), "
-                "telepon VARCHAR(30), email VARCHAR(100), created_at DATETIME)"
+                "id INTEGER PRIMARY KEY, nama VARCHAR(150)"
+                f"{code_column})"
             )
         )
-        connection.execute(
-            text(
-                "INSERT INTO supplier (id, nama) VALUES "
-                "(1, 'One'), (12, 'Twelve'), (1234, 'Large')"
-            )
-        )
+        for supplier_id, nama, code in rows:
+            values = {"id": supplier_id, "nama": nama, "code": code}
+            if with_code:
+                connection.execute(
+                    text(
+                        "INSERT INTO supplier (id, nama, kode_supplier) "
+                        "VALUES (:id, :nama, :code)"
+                    ),
+                    values,
+                )
+            else:
+                connection.execute(
+                    text("INSERT INTO supplier (id, nama) VALUES (:id, :nama)"),
+                    values,
+                )
+
+
+def supplier_codes(engine):
+    with engine.connect() as connection:
+        return connection.execute(
+            text("SELECT id, kode_supplier FROM supplier ORDER BY id")
+        ).all()
+
+
+def test_supplier_migration_normalizes_backfills_and_is_idempotent_on_sqlite(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'legacy.db'}"
+    engine = create_engine(database_url)
+    create_legacy_supplier_table(
+        engine,
+        [(1, "One", " sup-001 "), (12, "Twelve", None), (1234, "Large", " custom ")],
+    )
 
     migration = load_supplier_migration()
     first = migration.migrate(database_url=database_url)
     second = migration.migrate(database_url=database_url)
 
-    assert first == {"columns_added": 1, "indexes_added": 1, "rows_backfilled": 3}
+    assert first == {"columns_added": 0, "indexes_added": 1, "rows_backfilled": 1}
     assert second == {"columns_added": 0, "indexes_added": 0, "rows_backfilled": 0}
+    assert supplier_codes(engine) == [
+        (1, "SUP-001"),
+        (12, "SUP-012"),
+        (1234, "CUSTOM"),
+    ]
     with engine.begin() as connection:
-        assert "kode_supplier" in {
-            column["name"] for column in inspect(connection).get_columns("supplier")
-        }
-        assert connection.execute(
-            text("SELECT id, kode_supplier FROM supplier ORDER BY id")
-        ).all() == [(1, "SUP-001"), (12, "SUP-012"), (1234, "SUP-1234")]
         with pytest.raises(Exception):
             connection.execute(
                 text(
@@ -344,4 +480,50 @@ def test_supplier_migration_is_idempotent_and_enforces_unique_code_on_sqlite(tmp
                     "VALUES (99, 'Duplicate', 'SUP-001')"
                 )
             )
+    engine.dispose()
+
+
+def test_supplier_migration_adds_missing_column(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'missing-column.db'}"
+    engine = create_engine(database_url)
+    create_legacy_supplier_table(engine, [(1, "One", None)], with_code=False)
+
+    counts = load_supplier_migration().migrate(database_url=database_url)
+
+    assert counts == {"columns_added": 1, "indexes_added": 1, "rows_backfilled": 1}
+    assert supplier_codes(engine) == [(1, "SUP-001")]
+    engine.dispose()
+
+
+def test_supplier_migration_normalized_collision_aborts_without_changes(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'normalized-collision.db'}"
+    engine = create_engine(database_url)
+    original = [(1, "A-1"), (2, " a-1 "), (3, None)]
+    create_legacy_supplier_table(
+        engine,
+        [(supplier_id, str(supplier_id), code) for supplier_id, code in original],
+    )
+
+    with pytest.raises(RuntimeError, match=r"1.*A-1.*2.*a-1"):
+        load_supplier_migration().migrate(database_url=database_url)
+
+    assert supplier_codes(engine) == original
+    assert not inspect(engine).get_indexes("supplier")
+    engine.dispose()
+
+
+def test_supplier_migration_generated_collision_aborts_without_backfill(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'generated-collision.db'}"
+    engine = create_engine(database_url)
+    original = [(1, "SUP-002"), (2, None)]
+    create_legacy_supplier_table(
+        engine,
+        [(supplier_id, str(supplier_id), code) for supplier_id, code in original],
+    )
+
+    with pytest.raises(RuntimeError, match=r"1.*SUP-002.*2.*SUP-002"):
+        load_supplier_migration().migrate(database_url=database_url)
+
+    assert supplier_codes(engine) == original
+    assert not inspect(engine).get_indexes("supplier")
     engine.dispose()

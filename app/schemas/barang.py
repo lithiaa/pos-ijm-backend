@@ -64,7 +64,9 @@ class KategoriRef(BaseModel):
 
 class SupplierRef(BaseModel):
     id: int
+    kode_supplier: Optional[str] = None
     nama: str
+    nama_supplier: str
     kontak: Optional[str] = None
     telepon: Optional[str] = None
     email: Optional[str] = None
