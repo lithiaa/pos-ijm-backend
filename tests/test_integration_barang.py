@@ -19,6 +19,20 @@ def integration_keterangan(operation_id):
     return f"Niimbot label integration | NIIMBOT_OPERATION_ID={operation_id}"
 
 
+def legacy_item(item):
+    fields = (
+        "id",
+        "sku",
+        "nama",
+        "harga_beli",
+        "harga_jual",
+        "harga_beli_kode",
+        "stok",
+        "satuan",
+    )
+    return {field: item[field] for field in fields}
+
+
 def create_payload(**overrides):
     payload = {
         "sku": "OIL-001",
@@ -86,7 +100,7 @@ def test_get_by_sku_normalizes_input_and_returns_full_item(client, db):
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert legacy_item(response.json()) == {
         "id": barang.id,
         "sku": "PART-001",
         "nama": "Brake Pad",
@@ -119,20 +133,18 @@ def test_search_returns_matching_item_with_integration_output(client, db):
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "data": [
-            {
-                "id": barang.id,
-                "sku": "FILTER-001",
-                "nama": "Oil Filter",
-                "harga_beli": 125_000,
-                "harga_jual": 175_000,
-                "harga_beli_kode": "STORED-BUY-CODE",
-                "stok": 9,
-                "satuan": "box",
-            }
-        ]
-    }
+    assert [legacy_item(item) for item in response.json()["data"]] == [
+        {
+            "id": barang.id,
+            "sku": "FILTER-001",
+            "nama": "Oil Filter",
+            "harga_beli": 125_000,
+            "harga_jual": 175_000,
+            "harga_beli_kode": "STORED-BUY-CODE",
+            "stok": 9,
+            "satuan": "box",
+        }
+    ]
 
 
 def test_search_is_case_insensitive_and_ranks_name_before_sku(client, db):
@@ -294,7 +306,7 @@ def test_post_with_zero_quantity_creates_item_without_stock_transaction(client, 
 
     assert response.status_code == 201
     body = response.json()
-    assert body == {
+    assert legacy_item(body) == {
         "id": body["id"],
         "sku": "OIL-001",
         "nama": "Oil Filter",
@@ -487,7 +499,7 @@ def test_put_by_sku_updates_buy_code_independently(client, db):
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert legacy_item(response.json()) == {
         "id": barang.id,
         "sku": "UPDATE-1",
         "nama": "New Name",

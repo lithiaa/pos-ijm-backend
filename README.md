@@ -10,7 +10,7 @@ Backend API untuk sistem manajemen stok sparepart kendaraan muatan (truk, bus, d
 - 📊 **Manajemen Stok** — Catat barang masuk/keluar, riwayat transaksi, stok menipis
 - 🏷️ **Kategori & Supplier** — Kelola pengelompokan barang dan data pemasok
 - 🔐 **Autentikasi JWT** — Login multi-user dengan role
-- 🕵️ **Kode Harga SANGUOERIP** — Harga jual ditampilkan dalam kode rahasia (S=1 A=2 N=3 G=4 U=5 O=6 E=7 R=8 I=9 P=0)
+- 🕵️ **Kode Harga** — Harga jual dapat ditampilkan dalam kode toko
 - 📈 **Dashboard** — Statistik ringkasan, grafik stok menipis, transaksi terbaru
 
 ---
@@ -225,42 +225,88 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 | `PUT` | `/api/barang/{id}` | Edit barang |
 | `DELETE` | `/api/barang/{id}` | Hapus barang |
 
-### 🔗 Integrasi Lithia POS
+### 🔗 Integrasi Mobile/POS
 
-Endpoint khusus integrasi menggunakan header `X-Integration-Key` yang nilainya
-diambil dari `POS_INTEGRATION_KEY`. SKU pada path dan saat pembuatan selalu
-dinormalisasi dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
+Semua endpoint berikut memakai header `X-Integration-Key`. SKU dinormalisasi
+dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 
 | Method | Endpoint | Fungsi |
 |---|---|---|
-| `GET` | `/api/integration/barang/by-sku/{sku}` | Ambil barang berdasarkan SKU persis |
-| `POST` | `/api/integration/barang` | Buat barang dan stok masuk awal secara atomik |
-| `PUT` | `/api/integration/barang/by-sku/{sku}` | Ubah nama, harga beli, dan harga jual |
-| `POST` | `/api/integration/barang/by-sku/{sku}/stok-masuk` | Tambah stok barang yang sudah ada secara idempoten |
+| `GET` | `/api/integration/barang` | Daftar barang; filter `q`, `kategori_id`, `supplier_id`, `stok_status`; pagination `page`, `limit` |
+| `GET` | `/api/integration/barang/meta` | Daftar kategori, supplier, dan satuan untuk form mobile |
+| `GET` | `/api/integration/barang/{id}` | Detail barang berdasarkan ID |
+| `PUT` | `/api/integration/barang/{id}` | Ubah sebagian metadata barang; field yang tidak dikirim tetap |
+| `DELETE` | `/api/integration/barang/{id}` | Hapus barang beserta riwayat stok dan record idempotensi terkait |
+| `POST` | `/api/integration/barang/{id}/foto` | Unggah/ganti foto barang |
+| `GET` | `/api/integration/barang/search?q=...` | Pencarian ringkas lama berdasarkan nama/SKU |
+| `GET` | `/api/integration/barang/by-sku/{sku}` | Detail lama berdasarkan SKU persis |
+| `POST` | `/api/integration/barang` | Buat barang dan stok awal secara atomik |
+| `PUT` | `/api/integration/barang/by-sku/{sku}` | Ubah nama dan harga melalui kontrak lama |
+| `POST` | `/api/integration/barang/by-sku/{sku}/stok-masuk` | Tambah stok secara idempoten |
 
-Contoh payload `POST`:
+`stok_status` menerima `aman`, `menipis`, atau `habis`; `limit` maksimal 100.
+Perubahan metadata tidak mengubah stok. Semua perubahan stok memakai endpoint
+`/by-sku/{sku}/stok-masuk`, bukan `PUT /{id}`.
+
+Contoh buat barang:
 
 ```json
 {
   "sku": "OIL-001",
   "nama": "Oil Filter",
   "harga_beli": 45000,
-  "harga_beli_kode": "MANUAL-X9",
+  "harga_beli_kode": "KODE-BELI",
   "harga_jual": 60000,
   "jumlah_barang_masuk": 10,
-  "operation_id": "b71d24f8-24a8-4e79-8c3c-e330807ca8ec"
+  "operation_id": "b71d24f8-24a8-4e79-8c3c-e330807ca8ec",
+  "merek": "Acme",
+  "kategori_id": 2,
+  "supplier_id": 3,
+  "stok_minimum": 5,
+  "satuan": "pcs",
+  "deskripsi": "Filter oli"
 }
 ```
 
-`harga_beli_kode` adalah string wajib (maksimal 50 karakter) yang diisi POS
-secara manual dan tidak harus berkaitan dengan `harga_beli`. `jumlah_barang_masuk`
-adalah integer wajib minimal `0`; jumlah label cetak tidak termasuk payload POS.
-`operation_id` adalah UUID wajib dan harus unik untuk setiap submit. Retry dengan
-UUID yang sama tidak menambah stok dua kali. `satuan` tetap opsional dengan nilai
-default `"pcs"`. Respons menyertakan stok terkini, harga numerik, dan kode beli
-tersimpan.
+Contoh ubah metadata; `null` pada relasi/teks opsional menghapus nilainya:
 
-Contoh payload stok masuk untuk barang yang sudah ada:
+```json
+{
+  "nama": "Oil Filter Premium",
+  "kategori_id": null,
+  "supplier_id": null,
+  "merek": null,
+  "deskripsi": null,
+  "stok_minimum": 8
+}
+```
+
+Contoh respons detail:
+
+```json
+{
+  "id": 12,
+  "sku": "OIL-001",
+  "nama": "Oil Filter Premium",
+  "harga_beli": 45000,
+  "harga_jual": 60000,
+  "harga_beli_kode": "KODE-BELI",
+  "stok": 10,
+  "satuan": "pcs",
+  "merek": null,
+  "foto": null,
+  "foto_url": null,
+  "kategori": null,
+  "supplier": null,
+  "stok_minimum": 8,
+  "stok_status": "aman",
+  "deskripsi": null,
+  "created_at": "2026-08-31T10:00:00",
+  "updated_at": "2026-08-31T10:05:00"
+}
+```
+
+Contoh stok masuk:
 
 ```json
 {
@@ -270,7 +316,10 @@ Contoh payload stok masuk untuk barang yang sudah ada:
 }
 ```
 
-Perubahan metadata melalui `PUT` tetap terpisah dan tidak mengubah stok.
+`operation_id` wajib berupa UUID unik; retry UUID sama tidak menambah stok dua
+kali. Upload foto memakai multipart field `file`, maksimal 5 MiB, dengan tipe
+JPEG, PNG, atau WebP. Nama file dibuat server. Penghapusan barang juga menghapus
+riwayat stok dan record idempotensi terkait dalam transaksi yang sama.
 
 **Query params untuk GET `/api/barang`:**
 
