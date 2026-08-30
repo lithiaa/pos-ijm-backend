@@ -210,8 +210,8 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 | Method | Endpoint | Fungsi |
 |---|---|---|
 | `GET` | `/api/supplier` | Daftar semua supplier |
-| `POST` | `/api/supplier` | Tambah supplier baru |
-| `PUT` | `/api/supplier/{id}` | Edit supplier |
+| `POST` | `/api/supplier` | Tambah supplier; `kode_supplier` opsional, dibuat otomatis jika tidak dikirim |
+| `PUT` | `/api/supplier/{id}` | Edit supplier, termasuk `kode_supplier` |
 | `DELETE` | `/api/supplier/{id}` | Hapus supplier |
 
 ### 📦 Barang
@@ -233,7 +233,8 @@ dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 | Method | Endpoint | Fungsi |
 |---|---|---|
 | `GET` | `/api/integration/barang` | Daftar barang; filter `q`, `kategori_id`, `supplier_id`, `stok_status`; pagination `page`, `limit` |
-| `GET` | `/api/integration/barang/meta` | Daftar kategori, supplier, dan satuan untuk form mobile |
+| `GET` | `/api/integration/barang/meta` | Daftar kategori, supplier (field lama + `kode_supplier` dan `nama_supplier`), dan satuan untuk form mobile |
+| `GET` | `/api/integration/suppliers` | Dropdown supplier minimal: `id`, `kode_supplier`, `nama_supplier` |
 | `GET` | `/api/integration/barang/{id}` | Detail barang berdasarkan ID |
 | `PUT` | `/api/integration/barang/{id}` | Ubah sebagian metadata barang; field yang tidak dikirim tetap |
 | `DELETE` | `/api/integration/barang/{id}` | Hapus barang beserta riwayat stok dan record idempotensi terkait; HTTP 409 jika ada riwayat cetak |
@@ -247,6 +248,35 @@ dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 `stok_status` menerima `aman`, `menipis`, atau `habis`; `limit` maksimal 100.
 Perubahan metadata tidak mengubah stok. Semua perubahan stok memakai endpoint
 `/by-sku/{sku}/stok-masuk`, bukan `PUT /{id}`.
+
+Contoh respons dropdown supplier:
+
+```json
+{
+  "data": [
+    {
+      "id": 3,
+      "kode_supplier": "SUP-003",
+      "nama_supplier": "Supplier Contoh"
+    }
+  ]
+}
+```
+
+Contoh buat supplier melalui API reguler; kode dinormalisasi menjadi huruf kapital:
+
+```json
+{
+  "kode_supplier": "sup-jkt",
+  "nama": "Supplier Jakarta",
+  "kontak": "Bagian Penjualan",
+  "telepon": "021-555-0100",
+  "email": "sales@example.test"
+}
+```
+
+Payload lama yang hanya mengirim `nama` tetap valid. Server membuat kode
+`SUP-{id}` dengan minimal tiga digit setelah ID tersedia.
 
 Contoh buat barang:
 

@@ -1,0 +1,13 @@
+-- Migration: supplier code
+-- Created: 2026-08-31
+--
+-- DOCUMENTATION ONLY. Do not run directly. Canonical idempotent entry point:
+--
+--   python migrations/20260831_add_supplier_kode.py
+--
+-- Python migration inspects existing columns/indexes, adds nullable field,
+-- backfills SUP-{id:03d}, and creates unique index only when missing.
+
+-- Equivalent one-time DDL for reference:
+-- ALTER TABLE supplier ADD COLUMN kode_supplier VARCHAR(50) NULL;
+-- CREATE UNIQUE INDEX ux_supplier_kode_supplier ON supplier (kode_supplier);

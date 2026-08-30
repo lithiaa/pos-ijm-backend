@@ -29,6 +29,7 @@ from app.schemas.integration_barang import (
     IntegrationBarangUpdate,
     IntegrationKategoriOut,
     IntegrationStokMasuk,
+    IntegrationSupplierMetaOut,
     IntegrationSupplierOut,
 )
 
@@ -275,8 +276,10 @@ def get_integration_barang_meta(db: Session = Depends(get_db)):
             for item in categories
         ],
         suppliers=[
-            IntegrationSupplierOut(
+            IntegrationSupplierMetaOut(
                 id=item.id,
+                kode_supplier=item.kode_supplier or "",
+                nama_supplier=item.nama,
                 nama=item.nama,
                 kontak=item.kontak,
                 telepon=item.telepon,

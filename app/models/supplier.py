@@ -7,6 +7,7 @@ class Supplier(Base):
     __tablename__ = "supplier"
 
     id = Column(Integer, primary_key=True, index=True)
+    kode_supplier = Column(String(50), nullable=True, unique=True, index=True)
     nama = Column(String(150))
     kontak = Column(String(100), nullable=True)
     telepon = Column(String(30), nullable=True)

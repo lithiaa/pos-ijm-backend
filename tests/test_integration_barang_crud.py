@@ -199,7 +199,15 @@ def test_meta_is_authenticated_sorted_distinct_and_has_pcs_fallback(client, db):
     assert [item["nama"] for item in body["suppliers"]] == ["Beta", "zulu"]
     assert body["satuan"] == ["box", "pcs"]
     assert set(body["categories"][0]) == {"id", "nama", "deskripsi"}
-    assert set(body["suppliers"][0]) == {"id", "nama", "kontak", "telepon", "email"}
+    assert set(body["suppliers"][0]) == {
+        "id",
+        "kode_supplier",
+        "nama_supplier",
+        "nama",
+        "kontak",
+        "telepon",
+        "email",
+    }
 
 
 def test_detail_returns_full_item_and_missing_404(client, db):

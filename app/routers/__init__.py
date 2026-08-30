@@ -8,6 +8,7 @@ from app.routers.chatbot import router as chatbot_router
 from app.routers.upload import router as upload_router
 from app.routers.printjob import router as printjob_router
 from app.routers.integration_barang import router as integration_barang_router
+from app.routers.integration_supplier import router as integration_supplier_router
 
 __all__ = [
     "auth_router",
@@ -20,4 +21,5 @@ __all__ = [
     "upload_router",
     "printjob_router",
     "integration_barang_router",
+    "integration_supplier_router",
 ]

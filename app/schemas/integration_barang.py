@@ -133,6 +133,11 @@ class IntegrationSupplierOut(BaseModel):
     email: str | None
 
 
+class IntegrationSupplierMetaOut(IntegrationSupplierOut):
+    kode_supplier: str
+    nama_supplier: str
+
+
 class IntegrationBarangOut(BaseModel):
     id: int
     sku: str
@@ -167,5 +172,5 @@ class IntegrationBarangListResponse(BaseModel):
 
 class IntegrationBarangMetaOut(BaseModel):
     categories: list[IntegrationKategoriOut]
-    suppliers: list[IntegrationSupplierOut]
+    suppliers: list[IntegrationSupplierMetaOut]
     satuan: list[str]
