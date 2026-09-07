@@ -12,6 +12,7 @@ class StokMasukRequest(BaseModel):
 class StokKeluarRequest(BaseModel):
     barang_id: int
     jumlah: int
+    harga_satuan: Optional[int] = None
     keterangan: Optional[str] = None
 
 

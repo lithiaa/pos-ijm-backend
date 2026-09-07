@@ -10,7 +10,8 @@ class BarangCreate(BaseModel):
     supplier_id: Optional[int] = None
     harga_modal: int = 0
     harga_beli_kode: Optional[str] = Field(default=None, max_length=50)
-    harga_jual_kode: str = "P"
+    harga_jual_kode: Optional[str] = None
+    harga_jual: Optional[int] = None
     stok_minimum: int = 5
 
     @field_validator("harga_beli_kode")
@@ -29,6 +30,7 @@ class BarangCreate(BaseModel):
 
 
 class BarangUpdate(BaseModel):
+    sku: Optional[str] = None
     nama: Optional[str] = None
     merek: Optional[str] = None
     kategori_id: Optional[int] = None
@@ -36,6 +38,7 @@ class BarangUpdate(BaseModel):
     harga_modal: Optional[int] = None
     harga_beli_kode: Optional[str] = Field(default=None, max_length=50)
     harga_jual_kode: Optional[str] = None
+    harga_jual: Optional[int] = None
     stok_minimum: Optional[int] = None
 
     @field_validator("harga_beli_kode")

@@ -48,6 +48,17 @@ def list_supplier(db: Session = Depends(get_db), user=Depends(get_current_user))
     ]
 
 
+@router.get("/{supplier_id}", response_model=SupplierOut)
+def detail_supplier(supplier_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier tidak ditemukan")
+    return _supplier_out(
+        supplier,
+        db.query(Barang).filter(Barang.supplier_id == supplier.id).count(),
+    )
+
+
 @router.post("", response_model=SupplierOut)
 def create_supplier(
     req: SupplierCreate,
