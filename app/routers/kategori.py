@@ -19,6 +19,15 @@ def list_kategori(db: Session = Depends(get_db), user=Depends(get_current_user))
     return result
 
 
+@router.get("/{kategori_id}", response_model=KategoriOut)
+def detail_kategori(kategori_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    kat = db.query(Kategori).filter(Kategori.id == kategori_id).first()
+    if not kat:
+        raise HTTPException(status_code=404, detail="Kategori tidak ditemukan")
+    jml = db.query(Barang).filter(Barang.kategori_id == kategori_id).count()
+    return KategoriOut(id=kat.id, nama=kat.nama, deskripsi=kat.deskripsi, jumlah_barang=jml)
+
+
 @router.post("")
 def create_kategori(req: KategoriCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     existing = db.query(Kategori).filter(Kategori.nama == req.nama).first()
@@ -31,7 +40,7 @@ def create_kategori(req: KategoriCreate, db: Session = Depends(get_db), user=Dep
     return kat
 
 
-@router.put("/{kategori_id}")
+@router.put("/{kategori_id}", response_model=KategoriOut)
 def update_kategori(kategori_id: int, req: KategoriUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     kat = db.query(Kategori).filter(Kategori.id == kategori_id).first()
     if not kat:
@@ -41,6 +50,7 @@ def update_kategori(kategori_id: int, req: KategoriUpdate, db: Session = Depends
     if req.deskripsi is not None:
         kat.deskripsi = req.deskripsi
     db.commit()
+    db.refresh(kat)
     return kat
 
 

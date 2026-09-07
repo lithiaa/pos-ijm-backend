@@ -51,6 +51,8 @@ def stok_keluar(req: StokKeluarRequest, db: Session = Depends(get_db), user=Depe
         barang_id=req.barang_id,
         jenis="keluar",
         jumlah=req.jumlah,
+        harga_satuan=req.harga_satuan,
+        total_harga=(req.harga_satuan or 0) * req.jumlah if req.harga_satuan else None,
         keterangan=req.keterangan,
         user_id=user.id,
     )
