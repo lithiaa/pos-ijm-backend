@@ -6,9 +6,9 @@ Backend API untuk sistem manajemen stok sparepart kendaraan muatan (truk, bus, d
 
 ## Fitur
 
-- 📦 **Manajemen Barang** — CRUD barang dengan SKU otomatis, kategori, supplier
+- 📦 **Manajemen Barang** — CRUD barang dengan SKU otomatis dan supplier
 - 📊 **Manajemen Stok** — Catat barang masuk/keluar, riwayat transaksi, stok menipis
-- 🏷️ **Kategori & Supplier** — Kelola pengelompokan barang dan data pemasok
+- 🤝 **Supplier** — Kelola data pemasok
 - 🔐 **Autentikasi JWT** — Login multi-user dengan role
 - 🕵️ **Kode Harga** — Harga jual dapat ditampilkan dalam kode toko
 - 📈 **Dashboard** — Statistik ringkasan, grafik stok menipis, transaksi terbaru
@@ -42,21 +42,18 @@ pos-ijm-backend/
     ├── auth.py              # Login, JWT, password hashing
     ├── models/              # Model database (SQLAlchemy)
     │   ├── barang.py
-    │   ├── kategori.py
     │   ├── supplier.py
     │   ├── transaksi.py     # StokSaatIni & TransaksiStok
     │   └── user.py
     ├── schemas/             # Schema request/response (Pydantic)
     │   ├── auth.py
     │   ├── barang.py
-    │   ├── kategori.py
     │   ├── stok.py
     │   └── supplier.py
     ├── routers/             # Endpoint API
     │   ├── auth.py
     │   ├── barang.py
     │   ├── dashboard.py
-    │   ├── kategori.py
     │   ├── stok.py
     │   └── supplier.py
     └── services/
@@ -101,6 +98,14 @@ export DATABASE_URL=sqlite:///./toko_sparepart.db
 
 ```sql
 CREATE DATABASE toko_sparepart CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+Untuk database lama yang masih memiliki fitur kategori, buat backup lalu jalankan
+migrasi idempoten berikut satu kali sebelum merilis kontrak API baru. Perintah ini
+aman diulang dan hanya mendukung MySQL/MariaDB:
+
+```bash
+python migrations/20260909_remove_kategori.py
 ```
 
 ### 5. Konfigurasi environment
@@ -196,15 +201,6 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 | `POST` | `/api/auth/login` | Login, dapatkan token JWT |
 | `GET` | `/api/auth/me` | Info user yang sedang login |
 
-### 🏷️ Kategori
-
-| Method | Endpoint | Fungsi |
-|---|---|---|
-| `GET` | `/api/kategori` | Daftar semua kategori |
-| `POST` | `/api/kategori` | Tambah kategori baru |
-| `PUT` | `/api/kategori/{id}` | Edit kategori |
-| `DELETE` | `/api/kategori/{id}` | Hapus kategori |
-
 ### 🤝 Supplier
 
 | Method | Endpoint | Fungsi |
@@ -218,7 +214,7 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 
 | Method | Endpoint | Fungsi |
 |---|---|---|
-| `GET` | `/api/barang` | Daftar barang (support search, filter kategori, pagination) |
+| `GET` | `/api/barang` | Daftar barang (support search dan pagination) |
 | `GET` | `/api/barang/stok-menipis` | Barang dengan stok <= stok minimum |
 | `GET` | `/api/barang/{id}` | Detail barang |
 | `POST` | `/api/barang` | Tambah barang baru |
@@ -232,8 +228,8 @@ dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 
 | Method | Endpoint | Fungsi |
 |---|---|---|
-| `GET` | `/api/integration/barang` | Daftar barang; filter `q`, `kategori_id`, `supplier_id`, `stok_status`; pagination `page`, `limit` |
-| `GET` | `/api/integration/barang/meta` | Daftar kategori, supplier (field lama + `kode_supplier` dan `nama_supplier`), dan satuan untuk form mobile |
+| `GET` | `/api/integration/barang` | Daftar barang; filter `q`, `supplier_id`, `stok_status`; pagination `page`, `limit` |
+| `GET` | `/api/integration/barang/meta` | Daftar supplier (field lama + `kode_supplier` dan `nama_supplier`) dan satuan untuk form mobile |
 | `GET` | `/api/integration/suppliers` | Dropdown supplier minimal: `id`, `kode_supplier`, `nama_supplier` |
 | `GET` | `/api/integration/barang/{id}` | Detail barang berdasarkan ID |
 | `PUT` | `/api/integration/barang/{id}` | Ubah sebagian metadata barang; field yang tidak dikirim tetap |
@@ -290,7 +286,6 @@ Contoh buat barang:
   "jumlah_barang_masuk": 10,
   "operation_id": "b71d24f8-24a8-4e79-8c3c-e330807ca8ec",
   "merek": "Acme",
-  "kategori_id": 2,
   "supplier_id": 3,
   "stok_minimum": 5,
   "satuan": "pcs",
@@ -303,7 +298,6 @@ Contoh ubah metadata; `null` pada relasi/teks opsional menghapus nilainya:
 ```json
 {
   "nama": "Oil Filter Premium",
-  "kategori_id": null,
   "supplier_id": null,
   "merek": null,
   "deskripsi": null,
@@ -326,7 +320,6 @@ Contoh respons detail:
   "merek": null,
   "foto": null,
   "foto_url": null,
-  "kategori": null,
   "supplier": null,
   "stok_minimum": 8,
   "stok_status": "aman",
@@ -359,7 +352,6 @@ tersebut.
 | Param | Tipe | Fungsi |
 |---|---|---|
 | `search` | string | Cari berdasarkan nama/SKU/merek |
-| `kategori_id` | int | Filter berdasarkan kategori |
 | `stok_menipis` | bool | Tampilkan hanya barang stok menipis |
 | `page` | int | Halaman (default: 1) |
 | `limit` | int | Jumlah per halaman (default: 20, max: 100) |

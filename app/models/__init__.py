@@ -1,5 +1,4 @@
 from app.models.user import User
-from app.models.kategori import Kategori
 from app.models.supplier import Supplier
 from app.models.barang import Barang
 from app.models.transaksi import (
@@ -10,7 +9,6 @@ from app.models.transaksi import (
 
 __all__ = [
     "User",
-    "Kategori",
     "Supplier",
     "Barang",
     "StokSaatIni",

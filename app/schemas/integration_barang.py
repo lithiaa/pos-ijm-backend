@@ -17,7 +17,6 @@ class IntegrationBarangCreate(BaseModel):
     operation_id: UUID
     satuan: str = Field(default="pcs", min_length=1, max_length=20)
     merek: str | None = Field(default=None, max_length=100)
-    kategori_id: int | None = None
     supplier_id: int | None = None
     stok_minimum: StrictInt = Field(default=5, ge=0)
     deskripsi: str | None = None
@@ -69,7 +68,6 @@ class IntegrationBarangMetadataUpdate(BaseModel):
     sku: str | None = Field(default=None, max_length=50)
     nama: str | None = Field(default=None, max_length=200)
     merek: str | None = Field(default=None, max_length=100)
-    kategori_id: int | None = None
     supplier_id: int | None = None
     harga_beli: StrictInt | None = Field(default=None, ge=0)
     harga_beli_kode: str | None = Field(default=None, max_length=50)
@@ -119,12 +117,6 @@ class IntegrationStokMasuk(BaseModel):
     operation_id: UUID
 
 
-class IntegrationKategoriOut(BaseModel):
-    id: int
-    nama: str
-    deskripsi: str | None
-
-
 class IntegrationSupplierOut(BaseModel):
     id: int
     nama: str
@@ -150,7 +142,6 @@ class IntegrationBarangOut(BaseModel):
     merek: str | None
     foto: str | None
     foto_url: str | None
-    kategori: IntegrationKategoriOut | None
     supplier: IntegrationSupplierOut | None
     stok_minimum: int
     stok_status: Literal["aman", "menipis", "habis"]
@@ -171,6 +162,5 @@ class IntegrationBarangListResponse(BaseModel):
 
 
 class IntegrationBarangMetaOut(BaseModel):
-    categories: list[IntegrationKategoriOut]
     suppliers: list[IntegrationSupplierMetaOut]
     satuan: list[str]

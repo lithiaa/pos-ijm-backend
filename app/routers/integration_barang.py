@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.integration_auth import require_integration_key
 from app.models.barang import Barang
-from app.models.kategori import Kategori
 from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import (
@@ -27,7 +26,6 @@ from app.schemas.integration_barang import (
     IntegrationBarangOut,
     IntegrationBarangSearchResponse,
     IntegrationBarangUpdate,
-    IntegrationKategoriOut,
     IntegrationStokMasuk,
     IntegrationSupplierMetaOut,
     IntegrationSupplierOut,
@@ -70,7 +68,6 @@ def _normalize_sku(sku: str) -> str:
 
 FULL_ITEM_OPTIONS = (
     joinedload(Barang.stok),
-    joinedload(Barang.kategori),
     joinedload(Barang.supplier),
 )
 
@@ -115,15 +112,6 @@ def _to_integration_out(barang: Barang) -> IntegrationBarangOut:
         merek=barang.merek,
         foto=barang.foto,
         foto_url=f"/storage/foto-barang/{barang.foto}" if barang.foto else None,
-        kategori=(
-            IntegrationKategoriOut(
-                id=barang.kategori.id,
-                nama=barang.kategori.nama,
-                deskripsi=barang.kategori.deskripsi,
-            )
-            if barang.kategori
-            else None
-        ),
         supplier=(
             IntegrationSupplierOut(
                 id=barang.supplier.id,
@@ -151,13 +139,7 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _validate_foreign_keys(
-    db: Session,
-    kategori_id: int | None,
-    supplier_id: int | None,
-) -> None:
-    if kategori_id is not None and not db.get(Kategori, kategori_id):
-        raise HTTPException(status_code=422, detail="Kategori not found")
+def _validate_supplier_id(db: Session, supplier_id: int | None) -> None:
     if supplier_id is not None and not db.get(Supplier, supplier_id):
         raise HTTPException(status_code=422, detail="Supplier not found")
 
@@ -212,7 +194,6 @@ def _add_stock_transaction(
 @router.get("", response_model=IntegrationBarangListResponse)
 def list_integration_barang(
     q: str | None = None,
-    kategori_id: int | None = None,
     supplier_id: int | None = None,
     stok_status: Literal["aman", "menipis", "habis"] | None = None,
     page: int = Query(default=1, ge=1),
@@ -233,8 +214,6 @@ def list_integration_barang(
                 ),
             )
         )
-    if kategori_id is not None:
-        query = query.filter(Barang.kategori_id == kategori_id)
     if supplier_id is not None:
         query = query.filter(Barang.supplier_id == supplier_id)
     if stok_status == "habis":
@@ -262,7 +241,6 @@ def list_integration_barang(
 
 @router.get("/meta", response_model=IntegrationBarangMetaOut)
 def get_integration_barang_meta(db: Session = Depends(get_db)):
-    categories = db.query(Kategori).order_by(func.lower(Kategori.nama), Kategori.id).all()
     suppliers = db.query(Supplier).order_by(func.lower(Supplier.nama), Supplier.id).all()
     values = {
         value.strip()
@@ -271,10 +249,6 @@ def get_integration_barang_meta(db: Session = Depends(get_db)):
     }
     values.add("pcs")
     return IntegrationBarangMetaOut(
-        categories=[
-            IntegrationKategoriOut(id=item.id, nama=item.nama, deskripsi=item.deskripsi)
-            for item in categories
-        ],
         suppliers=[
             IntegrationSupplierMetaOut(
                 id=item.id,
@@ -354,13 +328,12 @@ def create_integration_barang(
 
     if _get_by_sku(db, req.sku):
         raise HTTPException(status_code=409, detail="SKU already exists")
-    _validate_foreign_keys(db, req.kategori_id, req.supplier_id)
+    _validate_supplier_id(db, req.supplier_id)
 
     barang = Barang(
         sku=req.sku,
         nama=req.nama,
         merek=req.merek,
-        kategori_id=req.kategori_id,
         supplier_id=req.supplier_id,
         harga_modal=req.harga_beli,
         harga_beli_kode=req.harga_beli_kode,
@@ -499,10 +472,8 @@ def update_integration_barang_by_id(
         )
         if duplicate:
             raise HTTPException(status_code=409, detail="SKU already exists")
-    _validate_foreign_keys(
-        db,
-        req.kategori_id if "kategori_id" in supplied else barang.kategori_id,
-        req.supplier_id if "supplier_id" in supplied else barang.supplier_id,
+    _validate_supplier_id(
+        db, req.supplier_id if "supplier_id" in supplied else barang.supplier_id
     )
 
     field_map = {"harga_beli": "harga_modal"}

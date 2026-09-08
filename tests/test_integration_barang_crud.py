@@ -1,6 +1,5 @@
 from app.database import SessionLocal
 from app.models.barang import Barang
-from app.models.kategori import Kategori
 from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import IntegrationStockOperation, StokSaatIni, TransaksiStok
@@ -21,17 +20,16 @@ IMAGE_BYTES = {
 }
 
 
-def add_refs(db):
-    kategori = Kategori(nama="Filter", deskripsi="Mesin")
+def add_supplier(db):
     supplier = Supplier(
         nama="Maju Jaya",
         kontak="Budi",
         telepon="021",
         email="sales@example.test",
     )
-    db.add_all([kategori, supplier])
+    db.add(supplier)
     db.commit()
-    return kategori, supplier
+    return supplier
 
 
 def add_barang(
@@ -40,7 +38,6 @@ def add_barang(
     sku="PART-001",
     nama="Brake Pad",
     merek="Akebono",
-    kategori_id=None,
     supplier_id=None,
     stok=7,
     stok_minimum=5,
@@ -51,7 +48,6 @@ def add_barang(
         sku=sku,
         nama=nama,
         merek=merek,
-        kategori_id=kategori_id,
         supplier_id=supplier_id,
         harga_modal=125_000,
         harga_beli_kode="BUY-X",
@@ -76,12 +72,11 @@ def test_list_requires_integration_key(client):
 
 
 def test_list_serializes_full_items_and_paginates_with_total(client, db):
-    kategori, supplier = add_refs(db)
+    supplier = add_supplier(db)
     beta = add_barang(
         db,
         sku="BETA",
         nama="beta",
-        kategori_id=kategori.id,
         supplier_id=supplier.id,
         foto="part.webp",
     )
@@ -108,7 +103,6 @@ def test_list_serializes_full_items_and_paginates_with_total(client, db):
         "merek": "Akebono",
         "foto": "part.webp",
         "foto_url": "/storage/foto-barang/part.webp",
-        "kategori": {"id": kategori.id, "nama": "Filter", "deskripsi": "Mesin"},
         "supplier": {
             "id": supplier.id,
             "nama": "Maju Jaya",
@@ -126,14 +120,13 @@ def test_list_serializes_full_items_and_paginates_with_total(client, db):
     assert body["data"][1]["updated_at"]
 
 
-def test_list_filters_query_refs_and_stock_status_with_missing_stock(client, db):
-    kategori, supplier = add_refs(db)
+def test_list_filters_query_supplier_and_stock_status_with_missing_stock(client, db):
+    supplier = add_supplier(db)
     safe = add_barang(
         db,
         sku="SAFE-100%",
         nama="Oil_Filter",
         merek="Bosch\\Pro",
-        kategori_id=kategori.id,
         supplier_id=supplier.id,
         stok=10,
     )
@@ -145,7 +138,7 @@ def test_list_filters_query_refs_and_stock_status_with_missing_stock(client, db)
     refs = client.get(
         BASE_URL,
         headers=AUTH_HEADERS,
-        params={"kategori_id": kategori.id, "supplier_id": supplier.id},
+        params={"supplier_id": supplier.id},
     )
     low_result = client.get(BASE_URL, headers=AUTH_HEADERS, params={"stok_status": "menipis"})
     empty_result = client.get(BASE_URL, headers=AUTH_HEADERS, params={"stok_status": "habis"})
@@ -171,7 +164,6 @@ def test_list_is_case_insensitive_deterministic_and_validates_params(client, db)
         {"limit": 0},
         {"limit": 101},
         {"stok_status": "unknown"},
-        {"kategori_id": "x"},
     ):
         assert client.get(BASE_URL, headers=AUTH_HEADERS, params=params).status_code == 422
 
@@ -179,8 +171,6 @@ def test_list_is_case_insensitive_deterministic_and_validates_params(client, db)
 def test_meta_is_authenticated_sorted_distinct_and_has_pcs_fallback(client, db):
     db.add_all(
         [
-            Kategori(nama="zeta", deskripsi=None),
-            Kategori(nama="Alpha", deskripsi="A"),
             Supplier(nama="zulu"),
             Supplier(nama="Beta"),
         ]
@@ -195,10 +185,9 @@ def test_meta_is_authenticated_sorted_distinct_and_has_pcs_fallback(client, db):
 
     assert response.status_code == 200
     body = response.json()
-    assert [item["nama"] for item in body["categories"]] == ["Alpha", "zeta"]
+    assert "categories" not in body
     assert [item["nama"] for item in body["suppliers"]] == ["Beta", "zulu"]
     assert body["satuan"] == ["box", "pcs"]
-    assert set(body["categories"][0]) == {"id", "nama", "deskripsi"}
     assert set(body["suppliers"][0]) == {
         "id",
         "kode_supplier",
@@ -267,8 +256,8 @@ def create_payload(**overrides):
     return payload
 
 
-def test_post_accepts_metadata_validates_fks_and_keeps_old_payload(client, db):
-    kategori, supplier = add_refs(db)
+def test_post_accepts_metadata_validates_supplier_fk_and_keeps_old_payload(client, db):
+    supplier = add_supplier(db)
     response = client.post(
         BASE_URL,
         headers=AUTH_HEADERS,
@@ -276,7 +265,6 @@ def test_post_accepts_metadata_validates_fks_and_keeps_old_payload(client, db):
             sku=" meta-1 ",
             nama=" Metadata ",
             merek="  Bosch  ",
-            kategori_id=kategori.id,
             supplier_id=supplier.id,
             stok_minimum=9,
             deskripsi="  Detail  ",
@@ -285,7 +273,6 @@ def test_post_accepts_metadata_validates_fks_and_keeps_old_payload(client, db):
 
     assert response.status_code == 201
     assert response.json()["merek"] == "Bosch"
-    assert response.json()["kategori"]["id"] == kategori.id
     assert response.json()["supplier"]["id"] == supplier.id
     assert response.json()["stok_minimum"] == 9
     assert response.json()["deskripsi"] == "Detail"
@@ -297,17 +284,12 @@ def test_post_accepts_metadata_validates_fks_and_keeps_old_payload(client, db):
     assert client.post(
         BASE_URL,
         headers=AUTH_HEADERS,
-        json=create_payload(sku="BAD-CAT", kategori_id=9999),
-    ).status_code == 422
-    assert client.post(
-        BASE_URL,
-        headers=AUTH_HEADERS,
         json=create_payload(sku="BAD-SUP", supplier_id=9999),
     ).status_code == 422
 
 
-def test_put_partial_preserves_omitted_normalizes_sku_and_validates_fks(client, db):
-    kategori, supplier = add_refs(db)
+def test_put_partial_preserves_omitted_normalizes_sku_and_validates_supplier_fk(client, db):
+    supplier = add_supplier(db)
     barang = add_barang(db, sku="UPDATE-1", stok=4)
 
     response = client.put(
@@ -316,7 +298,6 @@ def test_put_partial_preserves_omitted_normalizes_sku_and_validates_fks(client, 
         json={
             "sku": " updated-1 ",
             "merek": "   ",
-            "kategori_id": kategori.id,
             "supplier_id": supplier.id,
             "deskripsi": "   ",
         },
@@ -330,20 +311,16 @@ def test_put_partial_preserves_omitted_normalizes_sku_and_validates_fks(client, 
     assert body["deskripsi"] is None
     assert body["stok"] == 4
     assert client.put(
-        f"{BASE_URL}/{barang.id}", headers=AUTH_HEADERS, json={"kategori_id": 9999}
-    ).status_code == 422
-    assert client.put(
         f"{BASE_URL}/{barang.id}", headers=AUTH_HEADERS, json={"supplier_id": 9999}
     ).status_code == 422
     assert client.put(f"{BASE_URL}/9999", headers=AUTH_HEADERS, json={}).status_code == 404
 
 
 def test_put_allows_nullable_relationships_and_text_without_resetting_numbers(client, db):
-    kategori, supplier = add_refs(db)
+    supplier = add_supplier(db)
     barang = add_barang(
         db,
         sku="CLEAR-1",
-        kategori_id=kategori.id,
         supplier_id=supplier.id,
     )
 
@@ -351,7 +328,6 @@ def test_put_allows_nullable_relationships_and_text_without_resetting_numbers(cl
         f"{BASE_URL}/{barang.id}",
         headers=AUTH_HEADERS,
         json={
-            "kategori_id": None,
             "supplier_id": None,
             "merek": None,
             "deskripsi": None,
@@ -360,7 +336,6 @@ def test_put_allows_nullable_relationships_and_text_without_resetting_numbers(cl
 
     assert response.status_code == 200
     body = response.json()
-    assert body["kategori"] is None
     assert body["supplier"] is None
     assert body["merek"] is None
     assert body["deskripsi"] is None
@@ -673,3 +648,30 @@ def test_openapi_lists_old_and_new_integration_methods(client):
     assert "post" in paths[f"{BASE_URL}/{{barang_id}}/foto"]
     assert {"get", "post"}.issubset(paths["/api/barang"])
     assert {"get", "put", "delete"}.issubset(paths["/api/barang/{barang_id}"])
+
+
+def test_category_fields_are_removed_from_integration_contract(client):
+    openapi = client.get("/openapi.json").json()
+    schemas = openapi["components"]["schemas"]
+
+    for schema_name in (
+        "IntegrationBarangCreate",
+        "IntegrationBarangMetadataUpdate",
+        "IntegrationBarangOut",
+        "IntegrationBarangMetaOut",
+    ):
+        assert not {
+            "kategori_id",
+            "kategori",
+            "categories",
+        } & schemas[schema_name]["properties"].keys()
+
+    assert "kategori_id" not in {
+        parameter["name"] for parameter in openapi["paths"][BASE_URL]["get"]["parameters"]
+    }
+
+    assert client.post(
+        BASE_URL,
+        headers=AUTH_HEADERS,
+        json=create_payload(sku="REMOVED-CAT", kategori_id=1),
+    ).status_code == 422

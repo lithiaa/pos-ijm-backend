@@ -5,7 +5,6 @@ from app.database import Base, engine
 from app.models.user import User
 from app.routers import (
     auth_router,
-    kategori_router,
     supplier_router,
     barang_router,
     stok_router,
@@ -35,7 +34,6 @@ app.add_middleware(
 
 # Register routers
 app.include_router(auth_router)
-app.include_router(kategori_router)
 app.include_router(supplier_router)
 app.include_router(barang_router)
 app.include_router(stok_router)

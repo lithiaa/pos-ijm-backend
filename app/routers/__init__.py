@@ -1,5 +1,4 @@
 from app.routers.auth import router as auth_router
-from app.routers.kategori import router as kategori_router
 from app.routers.supplier import router as supplier_router
 from app.routers.barang import router as barang_router
 from app.routers.stok import router as stok_router
@@ -12,7 +11,6 @@ from app.routers.integration_supplier import router as integration_supplier_rout
 
 __all__ = [
     "auth_router",
-    "kategori_router",
     "supplier_router",
     "barang_router",
     "stok_router",

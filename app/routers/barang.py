@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from app.database import get_db
 from app.models.barang import Barang
-from app.models.kategori import Kategori
 from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import (
@@ -14,7 +13,6 @@ from app.models.transaksi import (
     TransaksiStok,
 )
 from app.schemas.barang import BarangCreate, BarangUpdate, BarangOut, BarangListResponse
-from app.schemas.kategori import KategoriOut
 from app.schemas.supplier import SupplierOut
 from app.auth import get_current_user
 from app.services.harga import harga_encode, harga_decode
@@ -23,11 +21,8 @@ from app.routers.upload import STORAGE_DIR
 router = APIRouter(prefix="/api/barang", tags=["barang"])
 
 
-def _validate_relation_ids(db: Session, req: BarangCreate | BarangUpdate) -> None:
+def _validate_supplier_id(db: Session, req: BarangCreate | BarangUpdate) -> None:
     supplied = req.model_fields_set
-    if "kategori_id" in supplied and req.kategori_id is not None:
-        if not db.get(Kategori, req.kategori_id):
-            raise HTTPException(status_code=422, detail="Kategori tidak ditemukan")
     if "supplier_id" in supplied and req.supplier_id is not None:
         if not db.get(Supplier, req.supplier_id):
             raise HTTPException(status_code=422, detail="Supplier tidak ditemukan")
@@ -40,11 +35,6 @@ def _barang_to_out(b: Barang) -> BarangOut:
         status = "Habis" if stok == 0 else "Menipis"
     else:
         status = "Aman"
-
-    kat_out = None
-    if b.kategori:
-        kat_out = KategoriOut(id=b.kategori.id, nama=b.kategori.nama,
-                              deskripsi=b.kategori.deskripsi, jumlah_barang=0)
 
     sup_out = None
     if b.supplier:
@@ -60,11 +50,8 @@ def _barang_to_out(b: Barang) -> BarangOut:
         sku=b.sku,
         nama=b.nama,
         merek=b.merek,
-        kategori_id=b.kategori_id,
         supplier_id=b.supplier_id,
-        kategori=kat_out,
         supplier=sup_out,
-        kategori_nama=b.kategori.nama if b.kategori else "",
         supplier_nama=b.supplier.nama if b.supplier else "",
         harga_modal=b.harga_modal,
         harga_beli_kode=b.harga_beli_kode or "",
@@ -84,7 +71,6 @@ def _barang_to_out(b: Barang) -> BarangOut:
 def list_barang(
     q: str = Query(None),
     search: str = Query(None),
-    kategori_id: int = Query(None),
     supplier_id: int = Query(None),
     stok_menipis: bool = Query(False),
     sort_by: str = Query("id"),
@@ -120,8 +106,6 @@ def list_barang(
                 Barang.merek.ilike(contains),
             )
         )
-    if kategori_id is not None:
-        query = query.filter(Barang.kategori_id == kategori_id)
     if supplier_id is not None:
         query = query.filter(Barang.supplier_id == supplier_id)
     if stok_menipis:
@@ -131,7 +115,6 @@ def list_barang(
     offset = skip if skip is not None else (page - 1) * limit
     data = (
         query.options(
-            joinedload(Barang.kategori),
             joinedload(Barang.supplier),
             joinedload(Barang.stok),
         )
@@ -162,7 +145,7 @@ def stok_menipis(db: Session = Depends(get_db), user=Depends(get_current_user)):
 @router.get("/{barang_id}")
 def detail_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     b = db.query(Barang).options(
-        joinedload(Barang.kategori), joinedload(Barang.supplier), joinedload(Barang.stok)
+        joinedload(Barang.supplier), joinedload(Barang.stok)
     ).filter(Barang.id == barang_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
@@ -171,7 +154,7 @@ def detail_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
 
 @router.post("")
 def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    _validate_relation_ids(db, req)
+    _validate_supplier_id(db, req)
     if req.harga_jual is not None:
         harga_jual = req.harga_jual
     else:
@@ -187,7 +170,6 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
         sku=sku,
         nama=req.nama,
         merek=req.merek,
-        kategori_id=req.kategori_id,
         supplier_id=req.supplier_id,
         harga_modal=req.harga_modal,
         harga_beli_kode=req.harga_beli_kode or harga_encode(req.harga_modal),
@@ -219,7 +201,7 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
     b = db.query(Barang).filter(Barang.id == barang_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
-    _validate_relation_ids(db, req)
+    _validate_supplier_id(db, req)
 
     # Update fields explicitly provided
     for field in req.model_fields_set:

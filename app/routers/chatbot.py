@@ -10,7 +10,6 @@ import requests
 from app.database import get_db
 from app.models.barang import Barang
 from app.models.transaksi import StokSaatIni, TransaksiStok
-from app.models.kategori import Kategori
 from app.models.supplier import Supplier
 from app.services.harga import harga_decode, harga_encode
 from app.services.supplier_code import assign_supplier_code
@@ -69,14 +68,6 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
             if not nama:
                 return {"response": "Gagal: Parameter 'nama' wajib diisi."}
 
-            kategori = None
-            if "kategori" in params:
-                kategori = db.query(Kategori).filter(Kategori.nama == params["kategori"]).first()
-                if not kategori:
-                    kategori = Kategori(nama=params["kategori"])
-                    db.add(kategori)
-                    db.flush()
-
             supplier = None
             if "supplier" in params:
                 supplier = db.query(Supplier).filter(Supplier.nama == params["supplier"]).first()
@@ -101,7 +92,6 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
             new_barang = Barang(
                 nama=nama,
                 merek=params.get("merek"),
-                kategori_id=kategori.id if kategori else None,
                 supplier_id=supplier.id if supplier else None,
                 harga_modal=int(harga_modal),
                 harga_jual=int(harga_jual),
@@ -222,14 +212,7 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                 if key == "harga_jual" or key == "harga_modal":
                     val_str = str(val)
                     val = harga_decode(val_str) if not val_str.isdigit() else int(val_str)
-                if key == "kategori":
-                    kat = db.query(Kategori).filter(Kategori.nama == val).first()
-                    if not kat:
-                        kat = Kategori(nama=val)
-                        db.add(kat)
-                        db.flush()
-                    setattr(barang, "kategori_id", kat.id)
-                elif key == "supplier":
+                if key == "supplier":
                     sup = db.query(Supplier).filter(Supplier.nama == val).first()
                     if not sup:
                         sup = Supplier(nama=val)

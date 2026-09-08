@@ -1,0 +1,11 @@
+-- Migration: remove the kategori feature
+-- Created: 2026-09-09
+--
+-- DOCUMENTATION ONLY. Do not run directly. Canonical idempotent entry point:
+--
+--   python migrations/20260909_remove_kategori.py
+--
+-- The Python migration is MySQL/MariaDB-only. It discovers and drops every
+-- foreign key and index using barang.kategori_id, drops that column, and then
+-- drops kategori. It checks each object before acting so interrupted and
+-- completed runs are safe to rerun.

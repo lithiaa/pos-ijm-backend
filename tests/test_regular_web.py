@@ -3,9 +3,8 @@ import pytest
 from sqlalchemy import event, text
 
 from app.auth import create_access_token
-from app.database import engine
+from app.database import Base, engine
 from app.models.barang import Barang
-from app.models.kategori import Kategori
 from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import IntegrationStockOperation, StokSaatIni, TransaksiStok
@@ -127,36 +126,34 @@ def test_delete_keeps_photo_when_commit_fails(auth, db, tmp_path, monkeypatch):
     assert (tmp_path / "keep.jpg").read_bytes() == b"keep"
 
 
-@pytest.mark.parametrize("resource", ["kategori", "supplier"])
-def test_master_detail_and_linked_delete(auth, resource):
-    record = auth.post(f"/api/{resource}", json={"nama": "QA master"}).json()
-    response = auth.get(f"/api/{resource}/{record['id']}")
+def test_supplier_detail_and_linked_delete(auth):
+    record = auth.post("/api/supplier", json={"nama": "QA master"}).json()
+    response = auth.get(f"/api/supplier/{record['id']}")
     assert response.status_code == 200
     assert response.json()["nama"] == "QA master"
-    assert auth.put(f"/api/{resource}/{record['id']}", json={"nama": "QA edit"}).json()["nama"] == "QA edit"
-    linked = item(auth, **{f"{resource}_id": record["id"]})
-    assert auth.delete(f"/api/{resource}/{record['id']}").status_code in (400, 409)
+    assert auth.put(f"/api/supplier/{record['id']}", json={"nama": "QA edit"}).json()["nama"] == "QA edit"
+    linked = item(auth, supplier_id=record["id"])
+    assert auth.delete(f"/api/supplier/{record['id']}").status_code in (400, 409)
     assert auth.delete(f"/api/barang/{linked['id']}").status_code == 200
-    assert auth.delete(f"/api/{resource}/{record['id']}").status_code == 200
+    assert auth.delete(f"/api/supplier/{record['id']}").status_code == 200
 
 
-def test_create_and_update_use_nullable_relation_ids(auth, db):
-    category = auth.post("/api/kategori", json={"nama": "QA category"}).json()
+def test_create_and_update_use_nullable_supplier_id(auth, db):
     supplier = auth.post("/api/supplier", json={"nama": "QA supplier"}).json()
 
     record = item(
         auth,
         harga_jual=1500,
-        kategori_id=category["id"],
         supplier_id=supplier["id"],
     )
 
     assert record["harga_jual"] == 1500
-    assert record["kategori"]["id"] == category["id"]
     assert record["supplier"]["id"] == supplier["id"]
     assert record["supplier_nama"] == "QA supplier"
+    assert "kategori_id" not in record
+    assert "kategori" not in record
+    assert "kategori_nama" not in record
     stored = db.get(Barang, record["id"])
-    assert stored.kategori_id == category["id"]
     assert stored.supplier_id == supplier["id"]
 
     response = auth.put(
@@ -164,23 +161,21 @@ def test_create_and_update_use_nullable_relation_ids(auth, db):
         json={
             "sku": "CHANGED",
             "harga_jual": 2500,
-            "kategori_id": None,
             "supplier_id": None,
         },
     )
     assert response.status_code == 200
     updated = response.json()
     assert updated["sku"] == "CHANGED" and updated["harga_jual"] == 2500
-    assert updated["kategori"] is None and updated["kategori_id"] is None
     assert updated["supplier"] is None and updated["supplier_id"] is None
     assert updated["supplier_nama"] == ""
     db.expire_all()
     stored = db.get(Barang, record["id"])
-    assert stored.kategori_id is None and stored.supplier_id is None
+    assert stored.supplier_id is None
 
 
 def test_relation_contract_rejects_names_and_unknown_ids(auth):
-    assert item(auth, sku="NULL-REFS", kategori_id=None, supplier_id=None)
+    assert item(auth, sku="NULL-REFS", supplier_id=None)
     for payload in (
         {"sku": "NAME-SUP", "supplier": "Arbitrary supplier"},
         {"sku": "NAME-CAT", "kategori": "Arbitrary category"},
@@ -191,6 +186,24 @@ def test_relation_contract_rejects_names_and_unknown_ids(auth):
             "/api/barang",
             json={"nama": "Invalid relation", "stok_awal": 0, **payload},
         ).status_code == 422
+
+
+def test_category_routes_and_item_contract_are_removed(auth):
+    openapi = auth.get("/openapi.json").json()
+    paths = openapi["paths"]
+
+    assert not any(path.startswith("/api/kategori") for path in paths)
+    assert "kategori" not in Base.metadata.tables
+    for schema_name in ("BarangCreate", "BarangUpdate", "BarangOut"):
+        properties = openapi["components"]["schemas"][schema_name]["properties"]
+        assert not {
+            "kategori_id",
+            "kategori",
+            "kategori_nama",
+        } & properties.keys()
+    assert "kategori_id" not in {
+        parameter["name"] for parameter in paths["/api/barang"]["get"]["parameters"]
+    }
 
 
 def test_item_supports_react_admin_search_page_and_skip_pagination(auth):
