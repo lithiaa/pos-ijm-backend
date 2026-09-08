@@ -66,31 +66,40 @@ def riwayat_stok(
     tanggal_mulai: str = Query(None),
     tanggal_akhir: str = Query(None),
     jenis: str = Query(None),
+    tipe: str = Query(None),
     page: int = Query(1, ge=1),
+    skip: int | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     q = db.query(TransaksiStok).options(
-        joinedload(TransaksiStok.barang), joinedload(TransaksiStok.user)
+        joinedload(TransaksiStok.barang).joinedload(Barang.supplier),
+        joinedload(TransaksiStok.user),
     )
 
     if tanggal_mulai:
         q = q.filter(TransaksiStok.created_at >= f"{tanggal_mulai} 00:00:00")
     if tanggal_akhir:
         q = q.filter(TransaksiStok.created_at <= f"{tanggal_akhir} 23:59:59")
-    if jenis:
-        q = q.filter(TransaksiStok.jenis == jenis)
+    transaction_type = jenis or tipe
+    if transaction_type:
+        q = q.filter(TransaksiStok.jenis == transaction_type)
 
     total = q.count()
-    data = q.order_by(TransaksiStok.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
+    offset = skip if skip is not None else (page - 1) * limit
+    data = q.order_by(TransaksiStok.created_at.desc(), TransaksiStok.id.desc()).offset(offset).limit(limit).all()
 
     result = []
     for t in data:
+        created_at = str(t.created_at)[:19] if t.created_at else ""
         result.append(TransaksiOut(
             id=t.id,
-            tanggal=str(t.created_at)[:19] if t.created_at else "",
+            tanggal=created_at,
+            created_at=created_at,
+            sku=(t.barang.sku or "") if t.barang else "",
             nama_barang=t.barang.nama if t.barang else "-",
+            supplier=t.barang.supplier.nama if t.barang and t.barang.supplier else None,
             jenis=t.jenis,
             jumlah=t.jumlah,
             harga_satuan=t.harga_satuan,

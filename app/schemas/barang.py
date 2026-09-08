@@ -1,8 +1,11 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 
 
 class BarangCreate(BaseModel):
+    # Relations accept IDs only; null means no category/supplier.
+    model_config = ConfigDict(extra="forbid")
+
     sku: Optional[str] = None
     nama: str
     merek: Optional[str] = None
@@ -30,6 +33,9 @@ class BarangCreate(BaseModel):
 
 
 class BarangUpdate(BaseModel):
+    # Omitted relation preserves it; explicit null clears it.
+    model_config = ConfigDict(extra="forbid")
+
     sku: Optional[str] = None
     nama: Optional[str] = None
     merek: Optional[str] = None
@@ -84,8 +90,12 @@ class BarangOut(BaseModel):
     sku: Optional[str] = None
     nama: str
     merek: Optional[str] = None
+    kategori_id: Optional[int] = None
+    supplier_id: Optional[int] = None
     kategori: Optional[KategoriRef] = None
     supplier: Optional[SupplierRef] = None
+    kategori_nama: str = ""
+    supplier_nama: str = ""
     harga_modal: int = 0
     harga_beli_kode: str = ""
     harga_jual: int = 0

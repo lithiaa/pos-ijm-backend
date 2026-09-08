@@ -19,7 +19,10 @@ class StokKeluarRequest(BaseModel):
 class TransaksiOut(BaseModel):
     id: int
     tanggal: str
+    created_at: str = ""
+    sku: str = ""
     nama_barang: str
+    supplier: Optional[str] = None
     jenis: str
     jumlah: int
     harga_satuan: Optional[int] = None

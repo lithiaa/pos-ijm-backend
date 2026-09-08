@@ -1,9 +1,13 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from app.database import get_db
 from app.models.barang import Barang
+from app.models.kategori import Kategori
 from app.models.printjob import PrintJob
+from app.models.supplier import Supplier
 from app.models.transaksi import (
     IntegrationStockOperation,
     StokSaatIni,
@@ -14,8 +18,19 @@ from app.schemas.kategori import KategoriOut
 from app.schemas.supplier import SupplierOut
 from app.auth import get_current_user
 from app.services.harga import harga_encode, harga_decode
+from app.routers.upload import STORAGE_DIR
 
 router = APIRouter(prefix="/api/barang", tags=["barang"])
+
+
+def _validate_relation_ids(db: Session, req: BarangCreate | BarangUpdate) -> None:
+    supplied = req.model_fields_set
+    if "kategori_id" in supplied and req.kategori_id is not None:
+        if not db.get(Kategori, req.kategori_id):
+            raise HTTPException(status_code=422, detail="Kategori tidak ditemukan")
+    if "supplier_id" in supplied and req.supplier_id is not None:
+        if not db.get(Supplier, req.supplier_id):
+            raise HTTPException(status_code=422, detail="Supplier tidak ditemukan")
 
 
 def _barang_to_out(b: Barang) -> BarangOut:
@@ -45,8 +60,12 @@ def _barang_to_out(b: Barang) -> BarangOut:
         sku=b.sku,
         nama=b.nama,
         merek=b.merek,
+        kategori_id=b.kategori_id,
+        supplier_id=b.supplier_id,
         kategori=kat_out,
         supplier=sup_out,
+        kategori_nama=b.kategori.nama if b.kategori else "",
+        supplier_nama=b.supplier.nama if b.supplier else "",
         harga_modal=b.harga_modal,
         harga_beli_kode=b.harga_beli_kode or "",
         harga_jual=b.harga_jual,
@@ -63,12 +82,15 @@ def _barang_to_out(b: Barang) -> BarangOut:
 
 @router.get("", response_model=BarangListResponse)
 def list_barang(
+    q: str = Query(None),
     search: str = Query(None),
     kategori_id: int = Query(None),
+    supplier_id: int = Query(None),
     stok_menipis: bool = Query(False),
     sort_by: str = Query("id"),
     sort_order: str = Query("ASC"),
     page: int = Query(1, ge=1),
+    skip: int | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
@@ -85,33 +107,45 @@ def list_barang(
     }
     order_col = sortable.get(sort_by, Barang.id)
     order = order_col.asc() if str(sort_order).upper() != "DESC" else order_col.desc()
+    stock = func.coalesce(StokSaatIni.jumlah, 0)
+    query = db.query(Barang).outerjoin(StokSaatIni)
 
-    q = db.query(Barang).options(joinedload(Barang.kategori), joinedload(Barang.supplier), joinedload(Barang.stok))
-
-    if search:
-        search = f"%{search}%"
-        q = q.filter(
-            Barang.nama.ilike(search) |
-            Barang.sku.ilike(search) |
-            Barang.merek.ilike(search)
+    term = (q or search or "").strip()
+    if term:
+        contains = f"%{term}%"
+        query = query.filter(
+            or_(
+                Barang.nama.ilike(contains),
+                Barang.sku.ilike(contains),
+                Barang.merek.ilike(contains),
+            )
         )
-    if kategori_id:
-        q = q.filter(Barang.kategori_id == kategori_id)
-
-    total = q.count()
-    data = q.order_by(order, Barang.id).offset((page - 1) * limit).limit(limit).all()
-
-    result = []
-    for b in data:
-        out = _barang_to_out(b)
-        if stok_menipis and out.status == "Aman":
-            continue
-        result.append(out)
-
+    if kategori_id is not None:
+        query = query.filter(Barang.kategori_id == kategori_id)
+    if supplier_id is not None:
+        query = query.filter(Barang.supplier_id == supplier_id)
     if stok_menipis:
-        total = len(result)
+        query = query.filter(stock <= Barang.stok_minimum)
 
-    return BarangListResponse(total=total, page=page, limit=limit, data=result)
+    total = query.count()
+    offset = skip if skip is not None else (page - 1) * limit
+    data = (
+        query.options(
+            joinedload(Barang.kategori),
+            joinedload(Barang.supplier),
+            joinedload(Barang.stok),
+        )
+        .order_by(order, Barang.id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return BarangListResponse(
+        total=total,
+        page=(offset // limit) + 1,
+        limit=limit,
+        data=[_barang_to_out(barang) for barang in data],
+    )
 
 
 @router.get("/stok-menipis")
@@ -137,6 +171,7 @@ def detail_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
 
 @router.post("")
 def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _validate_relation_ids(db, req)
     if req.harga_jual is not None:
         harga_jual = req.harga_jual
     else:
@@ -184,6 +219,7 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
     b = db.query(Barang).filter(Barang.id == barang_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
+    _validate_relation_ids(db, req)
 
     # Update fields explicitly provided
     for field in req.model_fields_set:
@@ -208,22 +244,27 @@ def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
     b = db.query(Barang).filter(Barang.id == barang_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
-    print_count = (
-        db.query(PrintJob).filter(PrintJob.barang_id == barang_id).count()
-    )
-    if print_count > 0:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Tidak bisa hapus, barang memiliki riwayat cetak label. "
-                "Hapus riwayat cetak lebih dulu jika yakin."
-            ),
-        )
-    db.query(IntegrationStockOperation).filter(
-        IntegrationStockOperation.barang_id == barang_id
-    ).delete()
-    db.query(StokSaatIni).filter(StokSaatIni.barang_id == barang_id).delete()
-    db.query(TransaksiStok).filter(TransaksiStok.barang_id == barang_id).delete()
-    db.delete(b)
-    db.commit()
-    return {"ok": True}
+    old_photo = b.foto
+
+    try:
+        for model in (
+            PrintJob,
+            IntegrationStockOperation,
+            StokSaatIni,
+            TransaksiStok,
+        ):
+            db.query(model).filter(model.barang_id == barang_id).delete(
+                synchronize_session=False
+            )
+        db.delete(b)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    if old_photo:
+        try:
+            os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
+        except OSError:
+            pass
+    return {"id": barang_id}
