@@ -12,6 +12,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "ganti-secret-key-ini")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
 POS_INTEGRATION_KEY = os.getenv("POS_INTEGRATION_KEY", "")
+AUDIT_TRUSTED_PROXIES = os.getenv("AUDIT_TRUSTED_PROXIES", "")
 
 # Admin default
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")

@@ -1,4 +1,5 @@
 from app.models.user import User
+from app.models.audit_log import AuditLog
 from app.models.supplier import Supplier
 from app.models.barang import Barang
 from app.models.transaksi import (
@@ -9,6 +10,7 @@ from app.models.transaksi import (
 
 __all__ = [
     "User",
+    "AuditLog",
     "Supplier",
     "Barang",
     "StokSaatIni",

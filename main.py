@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
+from app.audit import AuditMiddleware
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.routers import (
     auth_router,
@@ -13,6 +15,7 @@ from app.routers import (
     upload_router,
     integration_barang_router,
     integration_supplier_router,
+    logs_router,
 )
 from app.routers.printjob import router as printjob_router
 from app.auth import hash_password
@@ -31,6 +34,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AuditMiddleware)
 
 # Register routers
 app.include_router(auth_router)
@@ -42,6 +46,7 @@ app.include_router(chatbot_router)
 app.include_router(upload_router)
 app.include_router(integration_barang_router)
 app.include_router(integration_supplier_router)
+app.include_router(logs_router)
 from app.routers.label import router as label_router
 app.include_router(label_router)
 app.include_router(printjob_router)

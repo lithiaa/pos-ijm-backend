@@ -29,8 +29,10 @@ def clean_database():
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
+def client(monkeypatch):
+    monkeypatch.setattr("main.hash_password", lambda _password: "test-only-hash")
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture

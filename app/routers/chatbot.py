@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import re
@@ -33,8 +33,26 @@ def get_current_user_placeholder():
     pass
 
 
+def _audit_mutation(
+    request: Request, *, action: str, resource: str, resource_id: object
+) -> None:
+    request.state.audit_skip = False
+    request.state.audit_override = {
+        "action": action,
+        "resource": resource,
+        "resource_id": str(resource_id),
+        "summary": {"request": request.state.audit_params},
+    }
+
+
 @router.post("/")
-def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Depends(get_current_user_placeholder)):
+def process_command(
+    req: ChatbotRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_placeholder),
+):
+    request.state.audit_skip = True
     cmd = req.command.strip()
     response = "Perintah tidak dikenali."
 
@@ -60,6 +78,7 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                     params["foto_base64"] = match_b64.group(1)
         except Exception as e:
             return {"response": f"Error parsing parameter: {e}"}
+    request.state.audit_params = params
 
     # =============== CREATE ===============
     if action == "tambah barang":
@@ -102,6 +121,12 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
             db.add(new_barang)
             db.commit()
             db.refresh(new_barang)
+            _audit_mutation(
+                request,
+                action="CREATE",
+                resource="barang",
+                resource_id=new_barang.id,
+            )
 
             # Initial stock
             if "stok" in params:
@@ -162,6 +187,12 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
 
             barang.foto = foto_filename
             db.commit()
+            _audit_mutation(
+                request,
+                action="UPDATE",
+                resource="barang",
+                resource_id=barang.id,
+            )
 
             foto_url = f"/storage/foto-barang/{foto_filename}"
             response = f"✅ Berhasil upload foto untuk {barang.nama}. URL: {foto_url}"
@@ -206,24 +237,41 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
             return {"response": f"Barang ID {barang_id} tidak ditemukan."}
 
         try:
+            changed = False
             for key, val in params.items():
                 if key == "id":
                     continue
                 if key == "harga_jual" or key == "harga_modal":
                     val_str = str(val)
                     val = harga_decode(val_str) if not val_str.isdigit() else int(val_str)
+                elif key in {"stok_minimum", "supplier_id"}:
+                    val = int(val)
                 if key == "supplier":
                     sup = db.query(Supplier).filter(Supplier.nama == val).first()
                     if not sup:
                         sup = Supplier(nama=val)
                         db.add(sup)
                         assign_supplier_code(db, sup)
-                    setattr(barang, "supplier_id", sup.id)
+                        changed = True
+                    if barang.supplier_id != sup.id:
+                        setattr(barang, "supplier_id", sup.id)
+                        changed = True
                 elif key == "foto":
-                    setattr(barang, key, val)
+                    if getattr(barang, key) != val:
+                        setattr(barang, key, val)
+                        changed = True
                 elif hasattr(barang, key):
-                    setattr(barang, key, val)
-            db.commit()
+                    if getattr(barang, key) != val:
+                        setattr(barang, key, val)
+                        changed = True
+            if changed:
+                db.commit()
+                _audit_mutation(
+                    request,
+                    action="UPDATE",
+                    resource="barang",
+                    resource_id=barang_id,
+                )
             response = f"✅ Berhasil ubah barang ID {barang_id}."
         except Exception as e:
             db.rollback()
@@ -246,6 +294,12 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
             db.query(StokSaatIni).filter(StokSaatIni.barang_id == barang_id).delete()
             db.delete(barang)
             db.commit()
+            _audit_mutation(
+                request,
+                action="DELETE",
+                resource="barang",
+                resource_id=barang_id,
+            )
             response = f"✅ Berhasil hapus barang ID {barang_id}."
         except Exception as e:
             db.rollback()
@@ -298,8 +352,6 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
         try:
             barang_id = int(params["id"])
             qty = int(params.get("qty", 1))
-            size = params.get("ukuran")
-
             barang = db.query(Barang).filter(Barang.id == barang_id).first()
             if not barang:
                 return {"response": f"Barang ID {barang_id} tidak ditemukan."}
@@ -308,6 +360,12 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
             job = PrintJob(barang_id=barang_id, qty=qty, status="pending")
             db.add(job)
             db.commit()
+            _audit_mutation(
+                request,
+                action="CREATE",
+                resource="print-jobs",
+                resource_id=job.id,
+            )
             try:
                 print_job_async(
                     nama=barang.nama,
@@ -337,8 +395,15 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                 return {"response": f"Ukuran tidak valid. Pilihan: {', '.join(size_ids)}"}
 
             config = load_label_config()
-            config['default_size'] = new_size
-            save_label_config(config)
+            if config.get('default_size') != new_size:
+                config['default_size'] = new_size
+                save_label_config(config)
+                _audit_mutation(
+                    request,
+                    action="UPDATE",
+                    resource="label",
+                    resource_id="config",
+                )
             response = f"✅ Ukuran label default diubah menjadi: {new_size}"
         else:
             config = load_label_config()
@@ -376,6 +441,12 @@ def process_command(req: ChatbotRequest, db: Session = Depends(get_db), user=Dep
                     )
                     db.add(ts)
                     db.commit()
+                    _audit_mutation(
+                        request,
+                        action="CREATE",
+                        resource="stok",
+                        resource_id=ts.id,
+                    )
 
                     from app.routers.label import load_label_config
                     config = load_label_config()

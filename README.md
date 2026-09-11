@@ -12,6 +12,7 @@ Backend API untuk sistem manajemen stok sparepart kendaraan muatan (truk, bus, d
 - 🔐 **Autentikasi JWT** — Login multi-user dengan role
 - 🕵️ **Kode Harga** — Harga jual dapat ditampilkan dalam kode toko
 - 📈 **Dashboard** — Statistik ringkasan, grafik stok menipis, transaksi terbaru
+- 🧾 **Log Aktivitas** — Audit terpusat untuk seluruh request perubahan data
 
 ---
 
@@ -108,6 +109,13 @@ aman diulang dan hanya mendukung MySQL/MariaDB:
 python migrations/20260909_remove_kategori.py
 ```
 
+Sebelum menjalankan versi aplikasi yang memiliki Log Aktivitas, buat tabel audit
+berikut. Migrasi khusus MySQL/MariaDB ini aman dijalankan ulang:
+
+```bash
+python migrations/20260909_add_audit_logs.py
+```
+
 ### 5. Konfigurasi environment
 
 ```bash
@@ -122,6 +130,8 @@ SECRET_KEY=isi-dengan-random-string-panjang
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=480
 POS_INTEGRATION_KEY=ganti-dengan-kunci-integrasi-yang-panjang
+# CIDR/IP proxy yang boleh memasok X-Real-IP/X-Forwarded-For (pisahkan dengan koma)
+AUDIT_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
 
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
@@ -192,7 +202,7 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 
 ## API Endpoint
 
-> Endpoint reguler `/api` (kecuali login) memakai header `Authorization: Bearer <token>`, sedangkan endpoint `/api/integration` memakai header `X-Integration-Key`.
+> Endpoint reguler `/api` (kecuali login) memakai header `Authorization: Bearer <token>`. Endpoint `/api/integration` menerima Bearer token pengguna berperan `admin`/`karyawan` atau header lama `X-Integration-Key`.
 
 ### 🔐 Autentikasi
 
@@ -200,6 +210,48 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 |---|---|---|
 | `POST` | `/api/auth/login` | Login, dapatkan token JWT |
 | `GET` | `/api/auth/me` | Info user yang sedang login |
+
+### 🧾 Log Aktivitas
+
+`GET /api/logs` bersifat read-only dan hanya dapat diakses pengguna dengan role
+`admin` melalui Bearer token. Respons memakai
+bentuk `{ "data": [...], "total": n, "page": n, "limit": n }`. Endpoint ini
+mendukung `q`, `action` (`CREATE`, `UPDATE`, `DELETE`), `resource`, `user`,
+`date_from`, `date_to`, `page`, `skip`, `limit`, `sort_by`, dan `sort_order`.
+Sort hanya menerima kolom yang diizinkan API dan selalu memakai `id` sebagai
+penentu urutan kedua agar pagination deterministik. Tidak ada endpoint create,
+edit, atau delete untuk log.
+
+Audit dicatat terpusat untuk `POST`, `PUT`, `PATCH`, dan `DELETE`, termasuk
+respons gagal dari route yang valid. Mutasi ke route yang tidak dikenal dan
+respons method-not-allowed (`404`/`405`) tidak dicatat. `POST /api/chatbot`
+hanya dicatat bila perintahnya benar-benar mengubah state, dengan aksi dan objek
+sesuai operasi perintah. Request `GET`, `HEAD`, dan `OPTIONS` juga tidak dicatat.
+Aktor Bearer disimpan sebagai ID/username pengguna;
+request dengan integration key yang valid memakai label `integration`. Kegagalan
+atau keberhasilan anonim dibatasi per sumber (20 catatan per 60 detik) dengan
+maksimal 1.024 sumber yang diingat di setiap proses agar trafik anonim tidak
+memperbesar database atau memori tanpa batas.
+
+Alamat dari `X-Real-IP`/`X-Forwarded-For` hanya dipercaya bila koneksi ASGI datang
+dari loopback atau jaringan proxy dalam `AUDIT_TRUSTED_PROXIES`. Selain itu,
+alamat peer ASGI selalu digunakan sehingga header dari klien langsung tidak dapat
+memalsukan sumber log.
+
+Persistensi audit bersifat best-effort dan tidak menahan respons bisnis. Setiap
+proses memiliki satu worker dengan antrean memori maksimal 256 catatan. Shutdown
+normal menguras antrean, tetapi catatan terbaru dibuang (dan dicatat ke log
+aplikasi) bila antrean penuh atau worker belum aktif; proses yang crash juga dapat
+kehilangan catatan yang masih di memori. Kegagalan database dicatat ke log
+aplikasi dan tidak mengubah hasil transaksi bisnis. Ini adalah batas durabilitas
+fitur audit saat ini, bukan jaminan pengiriman persisten.
+
+Ringkasan hanya mengambil body JSON hingga batas internal dan dibatasi maksimal
+8 KiB. Field bertanda password, token, key, secret, authorization, cookie,
+base64, foto/photo/image, atau file direduksi secara rekursif menjadi
+`[REDACTED]`. Header autentikasi, cookie, token respons, query string, dan byte
+multipart tidak disimpan. Untuk upload, ringkasan hanya berisi tipe media dan
+ukuran request.
 
 ### 🤝 Supplier
 
@@ -223,8 +275,9 @@ Env: `PRINT_API_URL` (default `https://api.ijm.lithiaproject.site`), `PRINT_DEVI
 
 ### 🔗 Integrasi Mobile/POS
 
-Semua endpoint berikut memakai header `X-Integration-Key`. SKU dinormalisasi
-dengan menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
+Semua endpoint berikut menerima `Authorization: Bearer <token>` untuk pengguna
+`admin`/`karyawan` atau header lama `X-Integration-Key`. SKU dinormalisasi dengan
+menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 
 | Method | Endpoint | Fungsi |
 |---|---|---|

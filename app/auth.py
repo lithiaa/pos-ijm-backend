@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -28,6 +28,7 @@ def create_access_token(data: dict) -> str:
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
@@ -43,4 +44,6 @@ def get_current_user(
     user = db.query(User).filter(User.id == int(user_id)).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    request.state.audit_user_id = user.id
+    request.state.audit_username = user.username
     return user
