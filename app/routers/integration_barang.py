@@ -25,6 +25,8 @@ from app.schemas.integration_barang import (
     IntegrationBarangMetadataUpdate,
     IntegrationBarangOut,
     IntegrationBarangSearchResponse,
+    IntegrationBarangStatistikItem,
+    IntegrationBarangStatistikResponse,
     IntegrationBarangUpdate,
     IntegrationStokMasuk,
     IntegrationSupplierMetaOut,
@@ -301,6 +303,44 @@ def search_integration_barang(
     )
     return IntegrationBarangSearchResponse(
         data=[_to_integration_out(item) for item in barang]
+    )
+
+
+@router.get("/statistik", response_model=IntegrationBarangStatistikResponse)
+def get_integration_barang_statistik(db: Session = Depends(get_db)):
+    stock = func.coalesce(StokSaatIni.jumlah, 0)
+    rows = (
+        db.query(Barang, stock.label("stok"))
+        .outerjoin(StokSaatIni)
+        .order_by(stock, func.lower(Barang.nama), Barang.id)
+        .all()
+    )
+
+    def item(barang: Barang, stok: int) -> IntegrationBarangStatistikItem:
+        return IntegrationBarangStatistikItem(
+            id=barang.id,
+            sku=barang.sku or "",
+            nama=barang.nama,
+            stok=stok,
+            stok_minimum=barang.stok_minimum or 0,
+            satuan=barang.satuan or "pcs",
+            foto=barang.foto,
+        )
+
+    # ponytail: lists include every item; add pagination when inventory grows large.
+    stok_habis = [item(barang, stok) for barang, stok in rows if stok <= 0]
+    stok_menipis = [
+        item(barang, stok)
+        for barang, stok in rows
+        if 0 < stok <= (barang.stok_minimum or 0)
+    ]
+    return IntegrationBarangStatistikResponse(
+        total_barang=len(rows),
+        total_stok=sum(stok for _, stok in rows),
+        total_stok_menipis=len(stok_menipis),
+        total_stok_habis=len(stok_habis),
+        stok_menipis=stok_menipis,
+        stok_habis=stok_habis,
     )
 
 

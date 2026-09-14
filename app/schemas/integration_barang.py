@@ -154,6 +154,25 @@ class IntegrationBarangSearchResponse(BaseModel):
     data: list[IntegrationBarangOut]
 
 
+class IntegrationBarangStatistikItem(BaseModel):
+    id: int
+    sku: str
+    nama: str
+    stok: int
+    stok_minimum: int
+    satuan: str
+    foto: str | None
+
+
+class IntegrationBarangStatistikResponse(BaseModel):
+    total_barang: int
+    total_stok: int
+    total_stok_menipis: int
+    total_stok_habis: int
+    stok_menipis: list[IntegrationBarangStatistikItem]
+    stok_habis: list[IntegrationBarangStatistikItem]
+
+
 class IntegrationBarangListResponse(BaseModel):
     data: list[IntegrationBarangOut]
     total: int
