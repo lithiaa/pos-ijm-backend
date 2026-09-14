@@ -288,6 +288,7 @@ menghapus spasi tepi dan mengubahnya menjadi huruf kapital.
 | `PUT` | `/api/integration/barang/{id}` | Ubah sebagian metadata barang; field yang tidak dikirim tetap |
 | `DELETE` | `/api/integration/barang/{id}` | Hapus barang beserta riwayat stok dan record idempotensi terkait; HTTP 409 jika ada riwayat cetak |
 | `POST` | `/api/integration/barang/{id}/foto` | Unggah/ganti foto barang |
+| `DELETE` | `/api/integration/barang/{id}/foto` | Hapus foto barang tanpa menghapus barang |
 | `GET` | `/api/integration/barang/search?q=...` | Pencarian ringkas lama berdasarkan nama/SKU |
 | `GET` | `/api/integration/barang/by-sku/{sku}` | Detail lama berdasarkan SKU persis |
 | `POST` | `/api/integration/barang` | Buat barang dan stok awal secara atomik |
@@ -393,12 +394,62 @@ Contoh stok masuk:
 ```
 
 `operation_id` wajib berupa UUID unik; retry UUID sama tidak menambah stok dua
-kali. Upload foto memakai multipart field `file`, maksimal 5 MiB, dengan tipe
-JPEG, PNG, atau WebP. Nama file dibuat server. Penghapusan barang juga menghapus
-riwayat stok dan record idempotensi terkait dalam transaksi yang sama. Jika barang
-memiliki riwayat cetak (`PrintJob`), penghapusan ditolak dengan HTTP 409; barang,
-riwayat stok, dan foto tetap tersimpan. Pengguna harus mempertahankan riwayat cetak
-tersebut.
+kali.
+
+#### Foto barang untuk mobile
+
+`GET /api/integration/barang` dan `GET /api/integration/barang/{id}` sudah
+mengembalikan `foto` (nama file) dan `foto_url` (path relatif), misalnya:
+
+```json
+{
+  "foto": "6a3b79d5-7bb4-42d0-904d-3bbb47ee32d0.webp",
+  "foto_url": "/storage/foto-barang/6a3b79d5-7bb4-42d0-904d-3bbb47ee32d0.webp"
+}
+```
+
+Tidak ada endpoint GET foto khusus di router integration. File dilayani melalui
+`GET /storage/foto-barang/{filename}`. Aplikasi mobile membentuk URL gambar dengan
+`API_BASE_URL + foto_url`, misalnya
+`https://api.example.test/storage/foto-barang/6a3b79d5-7bb4-42d0-904d-3bbb47ee32d0.webp`.
+Jika barang belum memiliki foto, kedua field bernilai `null`.
+
+Semua operasi foto memakai `Authorization: Bearer <token>` untuk pengguna
+`admin`/`karyawan`. Header lama `X-Integration-Key` masih didukung selama migrasi
+klien, tetapi integrasi baru sebaiknya memakai Bearer token. Jangan menyimpan
+contoh token atau integration key nyata dalam source code.
+
+Unggah atau ganti foto:
+
+```bash
+curl -X POST "https://api.example.test/api/integration/barang/12/foto" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@foto-barang.webp;type=image/webp"
+```
+
+`POST` menerima multipart field `file`, hanya JPEG, PNG, atau WebP. Server
+memeriksa tipe media dan signature file, menolak file kosong, serta membatasi
+ukuran maksimal 5 MiB. Nama file dibuat server. Upload sukses mengganti referensi
+foto dan menghapus file lama. Status: `200` sukses, `404` barang tidak ditemukan,
+`413` file terlalu besar, `422` file tidak valid.
+
+Hapus foto:
+
+```bash
+curl -X DELETE "https://api.example.test/api/integration/barang/12/foto" \
+  -H "Authorization: Bearer <token>"
+```
+
+`DELETE` mengosongkan `foto` tanpa menghapus barang lalu menghapus file tersimpan
+jika ada. File disk yang sudah hilang tidak menggagalkan operasi. Pemanggilan ulang
+saat `foto` sudah `null` tetap sukses. Status: `204` sukses tanpa body, `404` barang
+tidak ditemukan. Kredensial hilang atau tidak valid menghasilkan respons generik
+`401 Unauthorized`.
+
+Penghapusan barang juga menghapus riwayat stok dan record idempotensi terkait
+dalam transaksi yang sama. Jika barang memiliki riwayat cetak (`PrintJob`),
+penghapusan ditolak dengan HTTP 409; barang, riwayat stok, dan foto tetap
+tersimpan. Pengguna harus mempertahankan riwayat cetak tersebut.
 
 **Query params untuk GET `/api/barang`:**
 

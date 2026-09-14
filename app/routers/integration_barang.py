@@ -586,6 +586,29 @@ async def upload_integration_barang_photo(
     return _to_integration_out(_get_by_id(db, barang_id))
 
 
+@router.delete("/{barang_id}/foto", status_code=status.HTTP_204_NO_CONTENT)
+def delete_integration_barang_photo(
+    barang_id: int = Path(ge=1),
+    db: Session = Depends(get_db),
+):
+    barang = _get_by_id(db, barang_id)
+    if not barang:
+        raise HTTPException(status_code=404, detail="Barang not found")
+    old_photo = barang.foto
+    barang.foto = None
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    if old_photo:
+        try:
+            os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
+        except OSError:
+            pass
+
+
 @router.delete("/{barang_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_integration_barang(
     barang_id: int = Path(ge=1),

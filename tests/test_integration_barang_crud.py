@@ -1,8 +1,10 @@
+from app.auth import create_access_token
 from app.database import SessionLocal
 from app.models.barang import Barang
 from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import IntegrationStockOperation, StokSaatIni, TransaksiStok
+from app.models.user import User
 from uuid import uuid4
 
 import pytest
@@ -200,7 +202,7 @@ def test_meta_is_authenticated_sorted_distinct_and_has_pcs_fallback(client, db):
 
 
 def test_detail_returns_full_item_and_missing_404(client, db):
-    barang = add_barang(db)
+    barang = add_barang(db, foto="detail.png")
 
     assert client.get(f"{BASE_URL}/{barang.id}").status_code == 401
     response = client.get(f"{BASE_URL}/{barang.id}", headers=AUTH_HEADERS)
@@ -208,6 +210,8 @@ def test_detail_returns_full_item_and_missing_404(client, db):
     assert response.status_code == 200
     assert response.json()["id"] == barang.id
     assert response.json()["stok_status"] == "aman"
+    assert response.json()["foto"] == "detail.png"
+    assert response.json()["foto_url"] == "/storage/foto-barang/detail.png"
     assert client.get(f"{BASE_URL}/9999", headers=AUTH_HEADERS).status_code == 404
     assert client.get(f"{BASE_URL}/0", headers=AUTH_HEADERS).status_code == 422
     assert client.get(f"{BASE_URL}/-1", headers=AUTH_HEADERS).status_code == 422
@@ -521,6 +525,96 @@ def test_delete_rolls_back_when_commit_fails(client, db, monkeypatch):
     assert db.query(StokSaatIni).filter_by(barang_id=barang.id).count() == 1
 
 
+def test_delete_photo_supports_jwt_and_clears_database_and_file(
+    client, db, tmp_path, monkeypatch
+):
+    from app.routers import integration_barang
+
+    monkeypatch.setattr(integration_barang, "STORAGE_DIR", str(tmp_path))
+    user = User(
+        username="photo-delete-user",
+        password_hash="unused",
+        nama="Photo Delete User",
+        role="karyawan",
+    )
+    db.add(user)
+    db.commit()
+    barang = add_barang(db, sku="PHOTO-JWT", foto="photo.jpg")
+    (tmp_path / "photo.jpg").write_bytes(b"photo")
+    headers = {
+        "Authorization": f"Bearer {create_access_token({'sub': str(user.id)})}"
+    }
+
+    response = client.delete(f"{BASE_URL}/{barang.id}/foto", headers=headers)
+
+    assert response.status_code == 204
+    assert response.content == b""
+    db.expire_all()
+    assert db.get(Barang, barang.id).foto is None
+    assert not (tmp_path / "photo.jpg").exists()
+
+
+def test_delete_photo_supports_legacy_key_and_is_idempotent_without_photo(client, db):
+    barang = add_barang(db, sku="PHOTO-LEGACY")
+
+    first = client.delete(f"{BASE_URL}/{barang.id}/foto", headers=AUTH_HEADERS)
+    second = client.delete(f"{BASE_URL}/{barang.id}/foto", headers=AUTH_HEADERS)
+
+    assert first.status_code == 204
+    assert second.status_code == 204
+    assert db.get(Barang, barang.id) is not None
+    assert db.get(Barang, barang.id).foto is None
+
+
+def test_delete_photo_clears_database_when_disk_file_is_missing(
+    client, db, tmp_path, monkeypatch
+):
+    from app.routers import integration_barang
+
+    monkeypatch.setattr(integration_barang, "STORAGE_DIR", str(tmp_path))
+    barang = add_barang(db, sku="PHOTO-MISSING-FILE", foto="missing.webp")
+
+    response = client.delete(f"{BASE_URL}/{barang.id}/foto", headers=AUTH_HEADERS)
+
+    assert response.status_code == 204
+    db.expire_all()
+    assert db.get(Barang, barang.id).foto is None
+
+
+def test_delete_photo_without_auth_is_generic_401_and_missing_barang_is_404(client, db):
+    barang = add_barang(db, sku="PHOTO-AUTH", foto="photo.jpg")
+
+    unauthorized = client.delete(f"{BASE_URL}/{barang.id}/foto")
+    missing = client.delete(f"{BASE_URL}/9999/foto", headers=AUTH_HEADERS)
+
+    assert unauthorized.status_code == 401
+    assert unauthorized.json() == {"detail": "Unauthorized"}
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "Barang not found"}
+    db.expire_all()
+    assert db.get(Barang, barang.id).foto == "photo.jpg"
+
+
+def test_delete_photo_uses_basename_and_never_unlinks_outside_storage(
+    client, db, tmp_path, monkeypatch
+):
+    from app.routers import integration_barang
+
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    outside = tmp_path / "outside.jpg"
+    outside.write_bytes(b"keep")
+    monkeypatch.setattr(integration_barang, "STORAGE_DIR", str(storage))
+    barang = add_barang(db, sku="PHOTO-SAFE", foto="../outside.jpg")
+
+    response = client.delete(f"{BASE_URL}/{barang.id}/foto", headers=AUTH_HEADERS)
+
+    assert response.status_code == 204
+    db.expire_all()
+    assert db.get(Barang, barang.id).foto is None
+    assert outside.read_bytes() == b"keep"
+
+
 def test_upload_requires_auth_validates_missing_type_size_and_empty(
     client, db, tmp_path, monkeypatch
 ):
@@ -645,7 +739,8 @@ def test_openapi_lists_old_and_new_integration_methods(client):
     assert {"get", "put"}.issubset(paths[f"{BASE_URL}/by-sku/{{sku}}"])
     assert "post" in paths[f"{BASE_URL}/by-sku/{{sku}}/stok-masuk"]
     assert {"get", "put", "delete"}.issubset(paths[f"{BASE_URL}/{{barang_id}}"])
-    assert "post" in paths[f"{BASE_URL}/{{barang_id}}/foto"]
+    assert {"post", "delete"}.issubset(paths[f"{BASE_URL}/{{barang_id}}/foto"])
+    assert "get" not in paths[f"{BASE_URL}/{{barang_id}}/foto"]
     assert {"get", "post"}.issubset(paths["/api/barang"])
     assert {"get", "put", "delete"}.issubset(paths["/api/barang/{barang_id}"])
 
