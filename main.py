@@ -16,6 +16,7 @@ from app.routers import (
     integration_barang_router,
     integration_supplier_router,
     logs_router,
+    katalog_router,
 )
 from app.routers.printjob import router as printjob_router
 from app.auth import hash_password
@@ -47,6 +48,7 @@ app.include_router(upload_router)
 app.include_router(integration_barang_router)
 app.include_router(integration_supplier_router)
 app.include_router(logs_router)
+app.include_router(katalog_router)
 from app.routers.label import router as label_router
 app.include_router(label_router)
 app.include_router(printjob_router)

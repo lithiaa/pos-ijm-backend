@@ -9,6 +9,7 @@ from app.routers.printjob import router as printjob_router
 from app.routers.integration_barang import router as integration_barang_router
 from app.routers.integration_supplier import router as integration_supplier_router
 from app.routers.logs import router as logs_router
+from app.routers.katalog import router as katalog_router
 
 __all__ = [
     "auth_router",
@@ -22,4 +23,5 @@ __all__ = [
     "integration_barang_router",
     "integration_supplier_router",
     "logs_router",
+    "katalog_router",
 ]

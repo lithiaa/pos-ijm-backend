@@ -273,6 +273,30 @@ ukuran request.
 | `PUT` | `/api/barang/{id}` | Edit barang |
 | `DELETE` | `/api/barang/{id}` | Hapus barang |
 
+### 🌐 Public Catalog API
+
+Endpoint ini tanpa autentikasi untuk website katalog: data hanya berisi `id`, `slug`,
+`sku`, `nama`, `merek`, `harga_jual`, `satuan`, `deskripsi`, `foto_url`, dan
+`shopee_url`. Harga modal, stok, supplier, audit, dan field internal tidak pernah
+keluar.
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| `GET` | `/api/katalog/barang?q=&page=1&limit=24` | Daftar katalog; `limit` 1–48, urut nama lalu ID |
+| `GET` | `/api/katalog/barang/{slug}` | Detail katalog; slug stabil dari nama dan ID |
+
+`foto_url` selalu path relatif `/storage/foto-barang/...` atau `null`. `shopee_url`
+opsional, dikelola dari CRUD Barang POS, dan hanya menerima URL HTTPS host
+`shopee.co.id` atau subdomainnya. Katalog publik sebaiknya diberi `noindex` oleh
+website bila belum siap muncul pada mesin pencari.
+
+Untuk database MySQL/MariaDB lama, jalankan migrasi idempoten berikut sebelum
+mengisi link Shopee:
+
+```bash
+python migrations/20260917_add_shopee_url.py
+```
+
 ### 🔗 Integrasi Mobile/POS
 
 Semua endpoint berikut menerima `Authorization: Bearer <token>` untuk pengguna

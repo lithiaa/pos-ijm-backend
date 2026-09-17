@@ -61,6 +61,7 @@ def _barang_to_out(b: Barang) -> BarangOut:
         satuan=b.satuan,
         deskripsi=b.deskripsi,
         foto=b.foto,
+        shopee_url=b.shopee_url,
         stok=stok,
         status=status,
         created_at=str(b.created_at)[:19] if b.created_at else None,
@@ -177,6 +178,7 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
         stok_minimum=req.stok_minimum,
         satuan=req.satuan,
         deskripsi=req.deskripsi,
+        shopee_url=req.shopee_url,
     )
     db.add(b)
     db.flush()

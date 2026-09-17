@@ -1,5 +1,23 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
+from urllib.parse import urlsplit
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def normalize_shopee_url(value: Optional[str]) -> Optional[str]:
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip()
+    parsed = urlsplit(normalized)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or (parsed.hostname != "shopee.co.id" and not parsed.hostname.endswith(".shopee.co.id"))
+    ):
+        raise ValueError("shopee_url must be an https Shopee Indonesia URL")
+    return normalized
 
 
 class BarangCreate(BaseModel):
@@ -28,7 +46,10 @@ class BarangCreate(BaseModel):
     satuan: str = "pcs"
     deskripsi: Optional[str] = None
     foto: Optional[str] = None
+    shopee_url: Optional[str] = Field(default=None, max_length=500)
     stok_awal: int = 0
+
+    _normalize_shopee_url = field_validator("shopee_url")(normalize_shopee_url)
 
 
 class BarangUpdate(BaseModel):
@@ -57,6 +78,9 @@ class BarangUpdate(BaseModel):
     satuan: Optional[str] = None
     deskripsi: Optional[str] = None
     foto: Optional[str] = None
+    shopee_url: Optional[str] = Field(default=None, max_length=500)
+
+    _normalize_shopee_url = field_validator("shopee_url")(normalize_shopee_url)
 
 
 class SupplierRef(BaseModel):
@@ -89,6 +113,7 @@ class BarangOut(BaseModel):
     satuan: str = "pcs"
     deskripsi: Optional[str] = None
     foto: Optional[str] = None
+    shopee_url: Optional[str] = None
     stok: int = 0
     status: str = "Aman"
     created_at: Optional[str] = None

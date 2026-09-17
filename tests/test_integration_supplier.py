@@ -372,6 +372,7 @@ def test_barang_list_serializes_supplier_code_name_and_old_fields(
         "satuan": "box",
         "deskripsi": "Kept",
         "foto": "route.jpg",
+        "shopee_url": None,
         "stok": 0,
         "status": "Habis",
         "created_at": None,

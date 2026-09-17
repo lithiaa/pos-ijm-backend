@@ -11,6 +11,7 @@ class Barang(Base):
     nama = Column(String(200))
     merek = Column(String(100), nullable=True)
     foto = Column(String(255), nullable=True)
+    shopee_url = Column(String(500), nullable=True)
     supplier_id = Column(Integer, ForeignKey("supplier.id"), nullable=True)
     harga_modal = Column(Integer, default=0)
     harga_beli_kode = Column(String(50), nullable=True)
