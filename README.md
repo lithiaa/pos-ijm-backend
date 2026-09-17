@@ -282,8 +282,15 @@ keluar.
 
 | Method | Endpoint | Fungsi |
 |---|---|---|
-| `GET` | `/api/katalog/barang?q=&page=1&limit=24` | Daftar katalog; `limit` 1–48, urut nama lalu ID |
+| `GET` | `/api/katalog/barang?q=&merek=&harga_min=&harga_max=&page=1&limit=24` | Daftar katalog; filter merek dan harga jual inklusif, `limit` 1–48, urut nama lalu ID |
+| `GET` | `/api/katalog/barang/filter-meta` | Metadata sidebar: merek unik dan harga jual minimum/maksimum |
 | `GET` | `/api/katalog/barang/{slug}` | Detail katalog; slug stabil dari nama dan ID |
+
+`merek` satu pilihan, dicocokkan case-insensitive setelah spasi tepi dihapus. `harga_min`
+dan `harga_max` bilangan bulat nonnegatif; keduanya inklusif dan `harga_min` tidak boleh
+melebihi `harga_max` (HTTP 422). Contoh: `/api/katalog/barang?merek=Bosch&harga_min=100000&harga_max=250000`.
+`/filter-meta` mengembalikan `{"merek":["Bosch"],"harga_min":100000,"harga_max":250000}`;
+ketika katalog kosong, kedua harga bernilai `0`.
 
 `foto_url` selalu path relatif `/storage/foto-barang/...` atau `null`. `shopee_url`
 opsional, dikelola dari CRUD Barang POS, dan hanya menerima URL HTTPS host

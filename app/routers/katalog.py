@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.barang import Barang
-from app.schemas.katalog import KatalogBarangListResponse, KatalogBarangOut
+from app.schemas.katalog import KatalogBarangListResponse, KatalogBarangOut, KatalogFilterMeta
 
 router = APIRouter(prefix="/api/katalog/barang", tags=["katalog"])
 
@@ -39,13 +39,34 @@ def _to_out(barang: Barang) -> KatalogBarangOut:
     )
 
 
+@router.get("/filter-meta", response_model=KatalogFilterMeta)
+def katalog_filter_meta(db: Session = Depends(get_db)):
+    harga_min, harga_max = db.query(func.min(Barang.harga_jual), func.max(Barang.harga_jual)).one()
+    merek = {}
+    for (value,) in db.query(Barang.merek).order_by(func.lower(Barang.merek), Barang.id):
+        normalized = (value or "").strip()
+        if normalized:
+            merek.setdefault(normalized.casefold(), normalized)
+    return KatalogFilterMeta(
+        merek=sorted(merek.values(), key=str.casefold),
+        harga_min=int(harga_min or 0),
+        harga_max=int(harga_max or 0),
+    )
+
+
 @router.get("", response_model=KatalogBarangListResponse)
 def list_katalog_barang(
     q: str | None = None,
+    merek: str | None = None,
+    harga_min: int | None = Query(default=None, ge=0),
+    harga_max: int | None = Query(default=None, ge=0),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=24, ge=1, le=48),
     db: Session = Depends(get_db),
 ):
+    if harga_min is not None and harga_max is not None and harga_min > harga_max:
+        raise HTTPException(status_code=422, detail="harga_min tidak boleh melebihi harga_max")
+
     query = db.query(Barang)
     term = (q or "").strip()
     if term:
@@ -57,6 +78,15 @@ def list_katalog_barang(
                 func.lower(func.coalesce(Barang.merek, "")).like(contains, escape="\\"),
             )
         )
+    selected_merek = (merek or "").strip()
+    if selected_merek:
+        query = query.filter(
+            func.lower(func.trim(func.coalesce(Barang.merek, ""))) == selected_merek.lower()
+        )
+    if harga_min is not None:
+        query = query.filter(Barang.harga_jual >= harga_min)
+    if harga_max is not None:
+        query = query.filter(Barang.harga_jual <= harga_max)
     total = query.count()
     data = (
         query.order_by(func.lower(Barang.nama), Barang.id)

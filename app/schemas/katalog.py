@@ -21,3 +21,9 @@ class KatalogBarangListResponse(BaseModel):
     total: int
     page: int
     limit: int
+
+
+class KatalogFilterMeta(BaseModel):
+    merek: list[str]
+    harga_min: int
+    harga_max: int
