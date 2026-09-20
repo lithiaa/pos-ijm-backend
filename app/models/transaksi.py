@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, func
+from sqlalchemy import BigInteger, Column, Integer, String, Text, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -21,7 +21,7 @@ class TransaksiStok(Base):
     jenis = Column(String(10))  # "masuk" / "keluar"
     jumlah = Column(Integer)
     harga_satuan = Column(Integer, nullable=True)
-    total_harga = Column(Integer, nullable=True)
+    total_harga = Column(BigInteger, nullable=True)
     keterangan = Column(Text, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
