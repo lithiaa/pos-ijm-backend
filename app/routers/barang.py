@@ -189,6 +189,8 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
     if req.stok_awal > 0:
         tx = TransaksiStok(
             barang_id=b.id, jenis="masuk", jumlah=req.stok_awal,
+            harga_satuan=req.harga_modal,
+            total_harga=req.harga_modal * req.stok_awal,
             keterangan="Stok awal", user_id=user.id,
         )
         db.add(tx)

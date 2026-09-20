@@ -37,6 +37,26 @@ def item(auth, **values):
     return response.json()
 
 
+def test_create_initial_stock_persists_harga_modal_snapshot(auth, db):
+    record = item(auth, sku="INITIAL-SNAPSHOT", stok_awal=4, harga_modal=12_500)
+
+    history = db.query(TransaksiStok).filter_by(barang_id=record["id"]).all()
+    assert len(history) == 1
+    assert history[0].jenis == "masuk"
+    assert history[0].harga_satuan == 12_500
+    assert history[0].total_harga == 50_000
+
+
+def test_create_initial_stock_zero_price_persists_zero_snapshot(auth, db):
+    priced = item(auth, sku="ZERO-PRICE", stok_awal=3, harga_modal=0)
+    no_stock = item(auth, sku="NO-INITIAL-STOCK", stok_awal=0, harga_modal=0)
+
+    history = db.query(TransaksiStok).filter_by(barang_id=priced["id"]).one()
+    assert history.harga_satuan == 0
+    assert history.total_harga == 0
+    assert db.query(TransaksiStok).filter_by(barang_id=no_stock["id"]).count() == 0
+
+
 @pytest.mark.parametrize("status", ["pending", "printing", "done", "failed"])
 def test_delete_cleans_print_jobs_and_all_target_dependencies(
     auth, db, foreign_keys, tmp_path, monkeypatch, status
