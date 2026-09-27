@@ -15,3 +15,4 @@ class Supplier(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     barang = relationship("Barang", back_populates="supplier")
+    barang_links = relationship("BarangSupplier", back_populates="supplier")

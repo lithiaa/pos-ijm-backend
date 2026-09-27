@@ -97,6 +97,21 @@ class SupplierRef(BaseModel):
         from_attributes = True
 
 
+class BarangSupplierOut(SupplierRef):
+    jumlah_masuk_kumulatif: int
+    is_primary: bool
+
+
+class BarangPhotoOut(BaseModel):
+    id: int
+    filename: str
+    foto: str
+    foto_url: str
+    urutan: int
+    is_primary: bool
+    created_at: Optional[str] = None
+
+
 class BarangOut(BaseModel):
     id: int
     sku: Optional[str] = None
@@ -105,6 +120,9 @@ class BarangOut(BaseModel):
     supplier_id: Optional[int] = None
     supplier: Optional[SupplierRef] = None
     supplier_nama: str = ""
+    primary_supplier_id: Optional[int] = None
+    primary_supplier: Optional[SupplierRef] = None
+    suppliers: list[BarangSupplierOut] = []
     harga_modal: int = 0
     harga_beli_kode: str = ""
     harga_jual: int = 0
@@ -113,6 +131,8 @@ class BarangOut(BaseModel):
     satuan: str = "pcs"
     deskripsi: Optional[str] = None
     foto: Optional[str] = None
+    foto_url: Optional[str] = None
+    photos: list[BarangPhotoOut] = []
     shopee_url: Optional[str] = None
     stok: int = 0
     status: str = "Aman"

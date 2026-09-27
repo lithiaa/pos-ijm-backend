@@ -114,6 +114,7 @@ class IntegrationStokMasuk(BaseModel):
 
     jumlah_barang_masuk: StrictInt = Field(ge=0)
     harga_satuan: StrictInt = Field(ge=0)
+    supplier_id: int | None = None
     operation_id: UUID
 
 

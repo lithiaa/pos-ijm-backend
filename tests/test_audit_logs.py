@@ -255,7 +255,8 @@ def test_multipart_audit_stores_metadata_not_file_bytes(
     barang = Barang(sku="UPLOAD-AUDIT", nama="Upload")
     db.add(barang)
     db.commit()
-    marker = b"binary-marker-must-not-survive"
+    authenticate(client, db)
+    marker = b"\xff\xd8\xffbinary-marker-must-not-survive"
 
     response = client.post(
         f"/api/upload/foto/{barang.id}",
@@ -267,7 +268,7 @@ def test_multipart_audit_stores_metadata_not_file_bytes(
     metadata = json.loads(summary)["upload"]
     assert metadata["content_type"] == "multipart/form-data"
     assert metadata["content_length"] > len(marker)
-    assert marker.decode() not in summary
+    assert b"binary-marker-must-not-survive".decode() not in summary
     assert "audit.jpg" not in summary
 
 

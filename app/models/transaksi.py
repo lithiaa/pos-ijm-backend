@@ -18,6 +18,7 @@ class TransaksiStok(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     barang_id = Column(Integer, ForeignKey("barang.id"))
+    supplier_id = Column(Integer, ForeignKey("supplier.id"), nullable=True, index=True)
     jenis = Column(String(10))  # "masuk" / "keluar"
     jumlah = Column(Integer)
     harga_satuan = Column(Integer, nullable=True)
@@ -28,6 +29,7 @@ class TransaksiStok(Base):
 
     barang = relationship("Barang")
     user = relationship("User", foreign_keys=[user_id])
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])
 
 
 class IntegrationStockOperation(Base):

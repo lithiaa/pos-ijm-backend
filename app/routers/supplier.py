@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models.barang import Barang
+from app.models.barang import Barang, BarangSupplier
 from app.models.supplier import Supplier
 from app.schemas.supplier import SupplierCreate, SupplierOut, SupplierUpdate
 from app.services.supplier_code import assign_supplier_code
@@ -42,7 +42,7 @@ def list_supplier(db: Session = Depends(get_db), user=Depends(get_current_user))
     return [
         _supplier_out(
             supplier,
-            db.query(Barang).filter(Barang.supplier_id == supplier.id).count(),
+            db.query(BarangSupplier).filter(BarangSupplier.supplier_id == supplier.id).count(),
         )
         for supplier in suppliers
     ]
@@ -55,7 +55,7 @@ def detail_supplier(supplier_id: int, db: Session = Depends(get_db), user=Depend
         raise HTTPException(status_code=404, detail="Supplier tidak ditemukan")
     return _supplier_out(
         supplier,
-        db.query(Barang).filter(Barang.supplier_id == supplier.id).count(),
+        db.query(BarangSupplier).filter(BarangSupplier.supplier_id == supplier.id).count(),
     )
 
 
@@ -106,7 +106,7 @@ def update_supplier(
     db.refresh(supplier)
     return _supplier_out(
         supplier,
-        db.query(Barang).filter(Barang.supplier_id == supplier.id).count(),
+        db.query(BarangSupplier).filter(BarangSupplier.supplier_id == supplier.id).count(),
     )
 
 

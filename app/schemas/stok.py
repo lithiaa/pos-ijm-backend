@@ -7,6 +7,7 @@ class StokMasukRequest(BaseModel):
     jumlah: int
     harga_satuan: Optional[int] = None
     keterangan: Optional[str] = None
+    supplier_id: Optional[int] = None
 
 
 class StokKeluarRequest(BaseModel):
@@ -23,6 +24,8 @@ class TransaksiOut(BaseModel):
     sku: str = ""
     nama_barang: str
     supplier: Optional[str] = None
+    supplier_id: Optional[int] = None
+    supplier_nama: Optional[str] = None
     jenis: str
     jumlah: int
     harga_satuan: Optional[int] = None

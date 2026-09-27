@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models.barang import Barang
+from app.models.supplier import Supplier
 from app.models.transaksi import StokSaatIni, TransaksiStok
+from app.services.stock_in import record_stock_in
 from app.schemas.stok import StokMasukRequest, StokKeluarRequest, TransaksiOut, TransaksiListResponse
 from app.auth import get_current_user
 
@@ -11,28 +13,16 @@ router = APIRouter(prefix="/api/stok", tags=["stok"])
 
 @router.post("/masuk")
 def stok_masuk(req: StokMasukRequest, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    barang = db.query(Barang).filter(Barang.id == req.barang_id).first()
+    if req.supplier_id is not None and not db.get(Supplier, req.supplier_id):
+        raise HTTPException(status_code=422, detail="Supplier tidak ditemukan")
+    barang, tx = record_stock_in(
+        db, barang_id=req.barang_id, jumlah=req.jumlah, harga_satuan=req.harga_satuan,
+        keterangan=req.keterangan, user_id=user.id, supplier_id=req.supplier_id,
+    )
     if not barang:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
-
-    stok = db.query(StokSaatIni).filter(StokSaatIni.barang_id == req.barang_id).first()
-    if not stok:
-        stok = StokSaatIni(barang_id=req.barang_id, jumlah=0)
-        db.add(stok)
-    stok.jumlah += req.jumlah
-
-    tx = TransaksiStok(
-        barang_id=req.barang_id,
-        jenis="masuk",
-        jumlah=req.jumlah,
-        harga_satuan=req.harga_satuan,
-        total_harga=(req.harga_satuan or 0) * req.jumlah if req.harga_satuan else None,
-        keterangan=req.keterangan,
-        user_id=user.id,
-    )
-    db.add(tx)
     db.commit()
-    return {"ok": True, "stok_baru": stok.jumlah, "transaksi_id": tx.id}
+    return {"ok": True, "stok_baru": barang.stok.jumlah, "transaksi_id": tx.id}
 
 
 @router.post("/keluar")
@@ -75,7 +65,7 @@ def riwayat_stok(
 ):
     q = db.query(TransaksiStok).options(
         joinedload(TransaksiStok.barang).joinedload(Barang.supplier),
-        joinedload(TransaksiStok.user),
+        joinedload(TransaksiStok.supplier), joinedload(TransaksiStok.user),
     )
 
     if tanggal_mulai:
@@ -99,7 +89,9 @@ def riwayat_stok(
             created_at=created_at,
             sku=(t.barang.sku or "") if t.barang else "",
             nama_barang=t.barang.nama if t.barang else "-",
-            supplier=t.barang.supplier.nama if t.barang and t.barang.supplier else None,
+            supplier=t.supplier.nama if t.supplier else (t.barang.supplier.nama if t.barang and t.barang.supplier else None),
+            supplier_id=t.supplier_id,
+            supplier_nama=t.supplier.nama if t.supplier else None,
             jenis=t.jenis,
             jumlah=t.jumlah,
             harga_satuan=t.harga_satuan,

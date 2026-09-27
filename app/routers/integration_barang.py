@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.integration_auth import require_integration_key
-from app.models.barang import Barang
+from app.models.barang import Barang, BarangSupplier
+from app.services.stock_in import record_stock_in
 from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import (
@@ -217,7 +218,7 @@ def list_integration_barang(
             )
         )
     if supplier_id is not None:
-        query = query.filter(Barang.supplier_id == supplier_id)
+        query = query.filter(or_(Barang.supplier_id == supplier_id, Barang.supplier_links.any(BarangSupplier.supplier_id == supplier_id)))
     if stok_status == "habis":
         query = query.filter(stock <= 0)
     elif stok_status == "menipis":
@@ -386,19 +387,14 @@ def create_integration_barang(
     try:
         db.add(barang)
         db.flush()
-        db.add(
-            StokSaatIni(
-                barang_id=barang.id,
-                jumlah=req.jumlah_barang_masuk,
-            )
-        )
-        _add_stock_transaction(
-            db,
-            barang_id=barang.id,
-            jumlah=req.jumlah_barang_masuk,
-            harga_satuan=req.harga_beli,
-            operation_id=operation_id,
-        )
+        db.add(StokSaatIni(barang_id=barang.id, jumlah=0))
+        db.flush()
+        if req.jumlah_barang_masuk:
+            record_stock_in(db, barang_id=barang.id, jumlah=req.jumlah_barang_masuk,
+                harga_satuan=req.harga_beli, keterangan=_keterangan(operation_id),
+                user_id=None, supplier_id=req.supplier_id)
+        elif req.supplier_id is not None:
+            db.add(BarangSupplier(barang_id=barang.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
         db.add(
             IntegrationStockOperation(
                 operation_id=operation_id,
@@ -439,26 +435,12 @@ def add_integration_stock(
     if previous_barang:
         return _to_integration_out(previous_barang)
 
+    _validate_supplier_id(db, req.supplier_id)
     try:
-        result = db.execute(
-            update(StokSaatIni)
-            .where(StokSaatIni.barang_id == barang.id)
-            .values(jumlah=StokSaatIni.jumlah + req.jumlah_barang_masuk)
-        )
-        if result.rowcount == 0:
-            db.add(
-                StokSaatIni(
-                    barang_id=barang.id,
-                    jumlah=req.jumlah_barang_masuk,
-                )
-            )
-
-        _add_stock_transaction(
-            db,
-            barang_id=barang.id,
-            jumlah=req.jumlah_barang_masuk,
-            harga_satuan=req.harga_satuan,
-            operation_id=operation_id,
+        record_stock_in(
+            db, barang_id=barang.id, jumlah=req.jumlah_barang_masuk,
+            harga_satuan=req.harga_satuan, keterangan=_keterangan(operation_id),
+            user_id=None, supplier_id=req.supplier_id,
         )
         db.add(
             IntegrationStockOperation(
