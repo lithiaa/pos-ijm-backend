@@ -1,5 +1,4 @@
 import os
-import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
@@ -9,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.integration_auth import require_integration_key
-from app.models.barang import Barang, BarangSupplier
+from app.models.barang import Barang, BarangFoto, BarangSupplier
 from app.services.stock_in import record_stock_in
 from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
@@ -18,7 +17,7 @@ from app.models.transaksi import (
     StokSaatIni,
     TransaksiStok,
 )
-from app.routers.upload import STORAGE_DIR
+from app.routers.upload import STORAGE_DIR, _save, add_photo, delete_photo as _delete_gallery_photo
 from app.schemas.integration_barang import (
     IntegrationBarangCreate,
     IntegrationBarangListResponse,
@@ -501,6 +500,14 @@ def update_integration_barang_by_id(
     field_map = {"harga_beli": "harga_modal"}
     for field in supplied:
         setattr(barang, field_map.get(field, field), getattr(req, field))
+    if "supplier_id" in supplied and req.supplier_id is not None:
+        if not db.get(BarangSupplier, (barang.id, req.supplier_id)):
+            db.add(BarangSupplier(barang_id=barang.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
+        winner = db.query(BarangSupplier).filter(
+            BarangSupplier.barang_id == barang.id, BarangSupplier.jumlah_masuk_kumulatif > 0
+        ).order_by(BarangSupplier.jumlah_masuk_kumulatif.desc(), BarangSupplier.supplier_id).first()
+        if winner:
+            barang.supplier_id = winner.supplier_id
 
     try:
         db.commit()
@@ -520,47 +527,22 @@ async def upload_integration_barang_photo(
     barang_id: int = Path(ge=1),
     db: Session = Depends(get_db),
 ):
-    barang = _get_by_id(db, barang_id)
-    if not barang:
+    if not _get_by_id(db, barang_id):
         raise HTTPException(status_code=404, detail="Barang not found")
-    content_type = file.content_type or ""
-    extension = PHOTO_EXTENSIONS.get(content_type)
-    if not extension:
-        raise HTTPException(status_code=422, detail="Unsupported image type")
-
-    os.makedirs(STORAGE_DIR, exist_ok=True)
-    filename = f"{uuid.uuid4()}{extension}"
-    path = os.path.join(STORAGE_DIR, filename)
-    size = 0
-    prefix = bytearray()
+    barang = _get_by_id(db, barang_id)
+    filename = await _save(file, STORAGE_DIR)
+    old_photo = barang.foto
     try:
-        with open(path, "xb") as output:
-            while chunk := await file.read(1024 * 1024):
-                size += len(chunk)
-                if size > MAX_PHOTO_BYTES:
-                    raise HTTPException(status_code=413, detail="Image exceeds 5 MiB")
-                if len(prefix) < 12:
-                    prefix.extend(chunk[: 12 - len(prefix)])
-                output.write(chunk)
-        if size == 0:
-            raise HTTPException(status_code=422, detail="Image must not be empty")
-        if not _matches_photo_signature(content_type, prefix):
-            raise HTTPException(status_code=422, detail="Invalid image content")
-
-        old_photo = barang.foto
-        barang.foto = filename
+        add_photo(db, barang_id, filename, primary=True)
         db.commit()
     except Exception:
         db.rollback()
         try:
-            os.remove(path)
+            os.remove(os.path.join(STORAGE_DIR, filename))
         except OSError:
             pass
         raise
-    finally:
-        await file.close()
-
-    if old_photo and os.path.basename(old_photo) != filename:
+    if old_photo and old_photo != filename and not db.query(BarangFoto).filter_by(barang_id=barang_id, filename=old_photo).first():
         try:
             os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
         except OSError:
@@ -577,18 +559,17 @@ def delete_integration_barang_photo(
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
     old_photo = barang.foto
-    barang.foto = None
-    try:
+    photo = db.query(BarangFoto).filter_by(barang_id=barang_id, filename=old_photo).first()
+    if not photo:
+        barang.foto = None
         db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    if old_photo:
-        try:
-            os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
-        except OSError:
-            pass
+        if old_photo:
+            try:
+                os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
+            except OSError:
+                pass
+        return
+    _delete_gallery_photo(barang_id, photo.id, db, None)
 
 
 @router.delete("/{barang_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -604,7 +585,9 @@ def delete_integration_barang(
             status_code=409,
             detail="Barang has print jobs and cannot be deleted",
         )
-    old_photo = barang.foto
+    photo_filenames = [photo.filename for photo in db.query(BarangFoto).filter_by(barang_id=barang_id)]
+    if barang.foto and barang.foto not in photo_filenames:
+        photo_filenames.append(barang.foto)
 
     try:
         db.query(IntegrationStockOperation).filter(
@@ -632,9 +615,9 @@ def delete_integration_barang(
         db.rollback()
         raise
 
-    if old_photo:
+    for filename in photo_filenames:
         try:
-            os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
+            os.remove(os.path.join(STORAGE_DIR, os.path.basename(filename)))
         except OSError:
             pass
 

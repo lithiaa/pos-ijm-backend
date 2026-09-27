@@ -237,6 +237,14 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
     # Handle harga_jual_kode only if harga_jual not provided
     if "harga_jual" not in req.model_fields_set and "harga_jual_kode" in req.model_fields_set:
         b.harga_jual = harga_decode(req.harga_jual_kode)
+    if "supplier_id" in req.model_fields_set and req.supplier_id is not None:
+        if not db.get(BarangSupplier, (b.id, req.supplier_id)):
+            db.add(BarangSupplier(barang_id=b.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
+        winner = db.query(BarangSupplier).filter(
+            BarangSupplier.barang_id == b.id, BarangSupplier.jumlah_masuk_kumulatif > 0
+        ).order_by(BarangSupplier.jumlah_masuk_kumulatif.desc(), BarangSupplier.supplier_id).first()
+        if winner:
+            b.supplier_id = winner.supplier_id
 
     db.commit()
     db.refresh(b)
@@ -248,7 +256,9 @@ def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
     b = db.query(Barang).filter(Barang.id == barang_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
-    old_photo = b.foto
+    photo_filenames = [photo.filename for photo in b.photos]
+    if b.foto and b.foto not in photo_filenames:
+        photo_filenames.append(b.foto)
 
     try:
         for model in (
@@ -266,9 +276,9 @@ def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
         db.rollback()
         raise
 
-    if old_photo:
+    for filename in photo_filenames:
         try:
-            os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
+            os.remove(os.path.join(STORAGE_DIR, os.path.basename(filename)))
         except OSError:
             pass
     return {"id": barang_id}

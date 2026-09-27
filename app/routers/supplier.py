@@ -119,9 +119,9 @@ def delete_supplier(
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier tidak ditemukan")
-    jumlah_barang = (
-        db.query(Barang).filter(Barang.supplier_id == supplier_id).count()
-    )
+    jumlah_barang = db.query(BarangSupplier).filter(
+        BarangSupplier.supplier_id == supplier_id
+    ).count()
     if jumlah_barang > 0:
         raise HTTPException(
             status_code=400,
