@@ -17,7 +17,7 @@ from app.models.transaksi import (
     StokSaatIni,
     TransaksiStok,
 )
-from app.routers.upload import STORAGE_DIR, _save, add_photo, delete_photo as _delete_gallery_photo
+from app.routers.upload import STORAGE_DIR, _locked_barang, _save, add_photo, delete_photo as _delete_gallery_photo, remove_unreferenced_file
 from app.schemas.integration_barang import (
     IntegrationBarangCreate,
     IntegrationBarangListResponse,
@@ -542,11 +542,8 @@ async def upload_integration_barang_photo(
         except OSError:
             pass
         raise
-    if old_photo and old_photo != filename and not db.query(BarangFoto).filter_by(barang_id=barang_id, filename=old_photo).first():
-        try:
-            os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
-        except OSError:
-            pass
+    if old_photo and old_photo != filename:
+        remove_unreferenced_file(db, old_photo, STORAGE_DIR)
     return _to_integration_out(_get_by_id(db, barang_id))
 
 
@@ -577,7 +574,7 @@ def delete_integration_barang(
     barang_id: int = Path(ge=1),
     db: Session = Depends(get_db),
 ):
-    barang = _get_by_id(db, barang_id)
+    barang = _locked_barang(db, barang_id)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
     if db.query(PrintJob.id).filter(PrintJob.barang_id == barang_id).first():
@@ -585,9 +582,9 @@ def delete_integration_barang(
             status_code=409,
             detail="Barang has print jobs and cannot be deleted",
         )
-    photo_filenames = [photo.filename for photo in db.query(BarangFoto).filter_by(barang_id=barang_id)]
-    if barang.foto and barang.foto not in photo_filenames:
-        photo_filenames.append(barang.foto)
+    photo_filenames = {photo.filename for photo in db.query(BarangFoto).filter_by(barang_id=barang_id)}
+    if barang.foto:
+        photo_filenames.add(barang.foto)
 
     try:
         db.query(IntegrationStockOperation).filter(
@@ -616,10 +613,7 @@ def delete_integration_barang(
         raise
 
     for filename in photo_filenames:
-        try:
-            os.remove(os.path.join(STORAGE_DIR, os.path.basename(filename)))
-        except OSError:
-            pass
+        remove_unreferenced_file(db, filename, STORAGE_DIR)
 
 
 @router.put("/by-sku/{sku}", response_model=IntegrationBarangOut)

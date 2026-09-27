@@ -126,6 +126,16 @@ def test_integration_photo_routes_keep_gallery_consistent(client, db, tmp_path, 
     assert client.get(f"/api/barang/{product['id']}/photos").json()[0]["filename"] == photos[1]["filename"]
 
 
+def test_product_delete_locks_product_before_gallery_snapshot(client, db, monkeypatch):
+    from app.routers import barang
+    product = auth_client(client, db).post("/api/barang", json={"sku": "LOCKDELETE", "nama": "Lock delete"}).json()
+    locked = []
+    original = barang._locked_barang
+    monkeypatch.setattr(barang, "_locked_barang", lambda session, product_id: locked.append(product_id) or original(session, product_id))
+    assert client.delete(f"/api/barang/{product['id']}").status_code == 200
+    assert locked == [product["id"]]
+
+
 def test_supplier_secondary_link_delete_is_controlled_and_product_delete_cleans_gallery(client, db, tmp_path, monkeypatch):
     from app.routers import barang, upload
     monkeypatch.setattr(upload, "STORAGE_DIR", str(tmp_path))
@@ -137,6 +147,19 @@ def test_supplier_secondary_link_delete_is_controlled_and_product_delete_cleans_
     assert api.delete(f"/api/supplier/{supplier['id']}").status_code in (400, 409)
     assert api.delete(f"/api/barang/{product['id']}").status_code == 200
     assert all(not (tmp_path / photo["filename"]).exists() for photo in photos)
+
+
+def test_gallery_allows_shared_legacy_filename_for_each_product(client, db):
+    first = Barang(sku="SHARED-ONE", nama="Shared one")
+    second = Barang(sku="SHARED-TWO", nama="Shared two")
+    db.add_all((first, second))
+    db.flush()
+    db.add_all((
+        BarangFoto(barang_id=first.id, filename="legacy.png", urutan=0),
+        BarangFoto(barang_id=second.id, filename="legacy.png", urutan=0),
+    ))
+    db.commit()
+    assert db.query(BarangFoto).filter_by(filename="legacy.png").count() == 2
 
 
 def test_append_photo_removes_file_when_db_conflict(client, db, tmp_path, monkeypatch):

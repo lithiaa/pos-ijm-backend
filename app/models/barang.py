@@ -48,7 +48,7 @@ class BarangFoto(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     barang_id = Column(Integer, ForeignKey("barang.id", ondelete="CASCADE"), nullable=False, index=True)
-    filename = Column(String(255), nullable=False, unique=True)
+    filename = Column(String(255), nullable=False)
     urutan = Column(Integer, nullable=False)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 

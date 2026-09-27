@@ -17,7 +17,7 @@ from app.schemas.barang import BarangCreate, BarangUpdate, BarangOut, BarangList
 from app.schemas.supplier import SupplierOut
 from app.auth import get_current_user
 from app.services.harga import harga_encode, harga_decode
-from app.routers.upload import STORAGE_DIR
+from app.routers.upload import STORAGE_DIR, _locked_barang, remove_unreferenced_file
 
 router = APIRouter(prefix="/api/barang", tags=["barang"])
 
@@ -253,12 +253,12 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
 
 @router.delete("/{barang_id}")
 def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    b = db.query(Barang).filter(Barang.id == barang_id).first()
+    b = _locked_barang(db, barang_id)
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
-    photo_filenames = [photo.filename for photo in b.photos]
-    if b.foto and b.foto not in photo_filenames:
-        photo_filenames.append(b.foto)
+    photo_filenames = {photo.filename for photo in b.photos}
+    if b.foto:
+        photo_filenames.add(b.foto)
 
     try:
         for model in (
@@ -277,8 +277,5 @@ def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
         raise
 
     for filename in photo_filenames:
-        try:
-            os.remove(os.path.join(STORAGE_DIR, os.path.basename(filename)))
-        except OSError:
-            pass
+        remove_unreferenced_file(db, filename, STORAGE_DIR)
     return {"id": barang_id}

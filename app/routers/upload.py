@@ -2,7 +2,7 @@ import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 
@@ -47,7 +47,17 @@ def _out(photo: BarangFoto, primary: bool) -> dict:
 
 
 def _locked_barang(db: Session, barang_id: int) -> Barang | None:
-    return db.execute(select(Barang).where(Barang.id == barang_id).with_for_update()).scalar_one_or_none()
+    barang = db.execute(select(Barang).where(Barang.id == barang_id).with_for_update()).scalar_one_or_none()
+    if barang and db.bind.dialect.name == "sqlite":
+        db.execute(update(Barang).where(Barang.id == barang_id).values(id=Barang.id))
+    return barang
+
+
+def remove_unreferenced_file(db: Session, filename: str, storage_dir: str = STORAGE_DIR) -> None:
+    if db.query(BarangFoto.id).filter_by(filename=filename).first() or db.query(Barang.id).filter_by(foto=filename).first():
+        return
+    try: os.remove(os.path.join(storage_dir, os.path.basename(filename)))
+    except OSError: pass
 
 
 def _reorder(db: Session, photos: list[BarangFoto]) -> None:
@@ -109,8 +119,7 @@ def delete_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), u
     barang = db.get(Barang, barang_id)
     barang.foto = photos[0].filename if photos else None
     db.commit()
-    try: os.remove(os.path.join(STORAGE_DIR, os.path.basename(filename)))
-    except OSError: pass
+    remove_unreferenced_file(db, filename, STORAGE_DIR)
     return {"ok": True}
 
 
