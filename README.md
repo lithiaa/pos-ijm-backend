@@ -128,7 +128,7 @@ Edit file `.env` sesuai server kamu:
 DATABASE_URL=mysql+pymysql://user:password@localhost:3306/toko_sparepart
 SECRET_KEY=isi-dengan-random-string-panjang
 ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=480
+ACCESS_TOKEN_EXPIRE_MINUTES=10080
 POS_INTEGRATION_KEY=ganti-dengan-kunci-integrasi-yang-panjang
 # CIDR/IP proxy yang boleh memasok X-Real-IP/X-Forwarded-For (pisahkan dengan koma)
 AUDIT_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
