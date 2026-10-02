@@ -11,7 +11,7 @@ class User(Base):
     username = Column(String(50), unique=True, index=True)
     password_hash = Column(String(255))
     nama = Column(String(100))
-    email = Column(String(255), nullable=True, index=True)
+    email = Column(String(255), nullable=True, unique=True, index=True)
     role = Column(String(20), default="karyawan")
     status = Column(String(20), default="active", nullable=False, server_default="active")
     must_change_password = Column(Boolean, default=False, nullable=False, server_default=text("0"))

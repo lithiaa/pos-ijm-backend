@@ -2,13 +2,14 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.admin import SupportGrant
 from app.models.environment import Environment
 from app.models.user import User
 from config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
@@ -220,6 +221,8 @@ def get_current_user(
 
 
 def get_current_user_env_id(
+    request: Request,
+    support_grant_id: int | None = Header(None, alias="X-Support-Grant"),
     principal: AuthPrincipal = Depends(get_current_principal),
     db: Session = Depends(get_db),
 ) -> int:
@@ -227,7 +230,23 @@ def get_current_user_env_id(
     if principal.environment is not None:
         return principal.environment.id
     if principal.is_platform_owner:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Environment required")
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        grant = db.query(SupportGrant).filter(
+            SupportGrant.id == support_grant_id,
+            SupportGrant.platform_owner_id == principal.id,
+            SupportGrant.revoked_at.is_(None),
+            SupportGrant.starts_at <= now,
+            SupportGrant.expires_at > now,
+        ).first()
+        if not grant:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Active support grant required")
+        request.state.audit_environment_id = grant.environment_id
+        request.state.audit_override = {
+            "action": "SUPPORT",
+            "resource": "support-access",
+            "summary": {"support_grant_id": grant.id, "environment_id": grant.environment_id},
+        }
+        return grant.environment_id
     legacy = db.query(Environment).filter(Environment.slug == "lithia-autoparts").first()
     if legacy is None:
         legacy = Environment(slug="lithia-autoparts", name="Lithia Autoparts", status="active")

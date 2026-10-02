@@ -19,6 +19,10 @@ EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 router = APIRouter()
 
 
+def _env_filter(column, env_id: int, user):
+    return column == env_id if user.role == "platform_owner" else ((column == env_id) | column.is_(None))
+
+
 def _valid_image(content_type: str, data: bytes) -> bool:
     if content_type == "image/jpeg": return data.startswith(b"\xff\xd8\xff")
     if content_type == "image/png": return data.startswith(b"\x89PNG\r\n\x1a\n")
@@ -87,15 +91,15 @@ def add_photo(db: Session, barang_id: int, filename: str, primary: bool = False)
 
 
 @router.get("/api/barang/{barang_id}/photos")
-def list_photos(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    if not db.get(Barang, barang_id): raise HTTPException(status_code=404, detail="Barang not found")
-    photos = db.query(BarangFoto).filter_by(barang_id=barang_id).order_by(BarangFoto.urutan, BarangFoto.id).all()
+def list_photos(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    if not db.query(Barang.id).filter(Barang.id == barang_id, _env_filter(Barang.environment_id, env_id, user)).first(): raise HTTPException(status_code=404, detail="Barang not found")
+    photos = db.query(BarangFoto).filter(BarangFoto.barang_id == barang_id, _env_filter(BarangFoto.environment_id, env_id, user)).order_by(BarangFoto.urutan, BarangFoto.id).all()
     return [_out(photo, index == 0) for index, photo in enumerate(photos)]
 
 
 @router.post("/api/barang/{barang_id}/photos")
-async def append_photo(barang_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user=Depends(get_current_user)):
-    if not db.get(Barang, barang_id): raise HTTPException(status_code=404, detail="Barang not found")
+async def append_photo(barang_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    if not db.query(Barang.id).filter(Barang.id == barang_id, _env_filter(Barang.environment_id, env_id, user)).first(): raise HTTPException(status_code=404, detail="Barang not found")
     filename = await _save(file)
     try:
         photo = add_photo(db, barang_id, filename)
@@ -112,7 +116,7 @@ async def append_photo(barang_id: int, file: UploadFile = File(...), db: Session
 def delete_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     barang_query = db.query(Barang).filter(Barang.id == barang_id)
     if isinstance(env_id, int):
-        barang_query = barang_query.filter(Barang.environment_id == env_id)
+        barang_query = barang_query.filter(_env_filter(Barang.environment_id, env_id, user))
     barang = barang_query.first()
     if not barang: raise HTTPException(status_code=404, detail="Barang not found")
     photo_query = db.query(BarangFoto).filter_by(id=photo_id, barang_id=barang_id)
@@ -132,21 +136,21 @@ def delete_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), u
 
 
 @router.put("/api/barang/{barang_id}/photos/{photo_id}/primary")
-def primary_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    photo = db.query(BarangFoto).filter_by(id=photo_id, barang_id=barang_id).first()
+def primary_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    photo = db.query(BarangFoto).filter(BarangFoto.id == photo_id, BarangFoto.barang_id == barang_id, _env_filter(BarangFoto.environment_id, env_id, user)).first()
     if not photo: raise HTTPException(status_code=404, detail="Foto not found")
-    photos = db.query(BarangFoto).filter_by(barang_id=barang_id).order_by(BarangFoto.urutan, BarangFoto.id).all()
+    photos = db.query(BarangFoto).filter(BarangFoto.barang_id == barang_id, _env_filter(BarangFoto.environment_id, env_id, user)).order_by(BarangFoto.urutan, BarangFoto.id).all()
     photos.remove(photo); photos.insert(0, photo)
     _reorder(db, photos)
-    db.get(Barang, barang_id).foto = photo.filename
+    db.query(Barang).filter(Barang.id == barang_id, _env_filter(Barang.environment_id, env_id, user)).one().foto = photo.filename
     db.commit(); db.refresh(photo)
     return _out(photo, True)
 
 
 @router.post("/api/upload/foto/{barang_id}")
-async def upload_foto_barang(barang_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user=Depends(get_current_user)):
+async def upload_foto_barang(barang_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     """Legacy endpoint appends then makes upload primary."""
-    if not db.get(Barang, barang_id): raise HTTPException(status_code=404, detail="Barang not found")
+    if not db.query(Barang.id).filter(Barang.id == barang_id, _env_filter(Barang.environment_id, env_id, user)).first(): raise HTTPException(status_code=404, detail="Barang not found")
     filename = await _save(file)
     try:
         photo = add_photo(db, barang_id, filename, primary=True)

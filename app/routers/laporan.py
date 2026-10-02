@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from app.database import get_db
 from app.models.barang import Barang
 from app.models.transaksi import TransaksiStok
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_env_id
 
 router = APIRouter(prefix="/api/laporan", tags=["laporan"])
 
@@ -17,6 +17,7 @@ def laba(
     until: str = Query(None, description="End date YYYY-MM-DD"),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
+    env_id: int = Depends(get_current_user_env_id),
 ):
     """Laba kotor per barang + total."""
     today = date.today()
@@ -30,6 +31,7 @@ def laba(
             func.sum(TransaksiStok.jumlah).label("total_terjual"),
         )
         .filter(
+            TransaksiStok.environment_id == env_id,
             TransaksiStok.jenis == "keluar",
             func.date(TransaksiStok.created_at) >= since_date,
             func.date(TransaksiStok.created_at) <= until_date,
@@ -44,7 +46,7 @@ def laba(
     total_laba = 0
 
     for row in rows:
-        barang = db.query(Barang).filter(Barang.id == row.barang_id).first()
+        barang = db.query(Barang).filter(Barang.id == row.barang_id, Barang.environment_id == env_id).first()
         if not barang:
             continue
         terjual = row.total_terjual or 0
@@ -85,6 +87,7 @@ def top_laba(
     limit: int = Query(5, ge=1, le=50),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
+    env_id: int = Depends(get_current_user_env_id),
 ):
     """Top-N barang by laba (all-time)."""
     rows = (
@@ -99,7 +102,7 @@ def top_laba(
 
     results = []
     for row in rows:
-        barang = db.query(Barang).filter(Barang.id == row.barang_id).first()
+        barang = db.query(Barang).filter(Barang.id == row.barang_id, Barang.environment_id == env_id).first()
         if not barang:
             continue
         terjual = row.total_terjual or 0

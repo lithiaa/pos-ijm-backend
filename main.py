@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
 from app.audit import AuditMiddleware
 from app.models.audit_log import AuditLog
+from app.models.admin import EnvironmentCopyJob, Invitation, ProvisionRequest, SupportGrant
 from app.models.user import User
 from app.routers import (
     auth_router,
@@ -19,6 +20,9 @@ from app.routers import (
     katalog_router,
 )
 from app.routers.printjob import router as printjob_router
+from app.routers.environments import router as environments_router
+from app.routers.users import router as users_router
+from app.routers.copy_jobs import router as copy_jobs_router
 from app.auth import hash_password
 from config import ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_NAMA
 
@@ -52,6 +56,9 @@ app.include_router(katalog_router)
 from app.routers.label import router as label_router
 app.include_router(label_router)
 app.include_router(printjob_router)
+app.include_router(environments_router)
+app.include_router(users_router)
+app.include_router(copy_jobs_router)
 from app.routers.laporan import router as laporan_router
 app.include_router(laporan_router)
 
@@ -78,6 +85,6 @@ def seed_data():
                 role="admin",
             ))
             db.commit()
-            print(f"Admin default created: {ADMIN_USERNAME} / {ADMIN_PASSWORD}")
+            print(f"Admin default created: {ADMIN_USERNAME}")
     finally:
         db.close()

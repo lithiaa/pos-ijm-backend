@@ -74,7 +74,7 @@ def dashboard(db: Session = Depends(get_db), user=Depends(get_current_user), env
 
 
 @router.get("/laba-full")
-def laba_full(db: Session = Depends(get_db), user=Depends(get_current_user)):
+def laba_full(db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     """Full laba detail endpoint for the frontend."""
     first_of_month = str(date.today().replace(day=1))
     today = str(date.today())
@@ -85,6 +85,7 @@ def laba_full(db: Session = Depends(get_db), user=Depends(get_current_user)):
             func.sum(TransaksiStok.jumlah).label("total_terjual"),
         )
         .filter(
+            TransaksiStok.environment_id == env_id,
             TransaksiStok.jenis == "keluar",
             func.date(TransaksiStok.created_at) >= first_of_month,
             func.date(TransaksiStok.created_at) <= today,
@@ -98,7 +99,7 @@ def laba_full(db: Session = Depends(get_db), user=Depends(get_current_user)):
     total_jual = 0
     total_modal = 0
     for row in rows:
-        b = db.query(Barang).filter(Barang.id == row.barang_id).first()
+        b = db.query(Barang).filter(Barang.id == row.barang_id, Barang.environment_id == env_id).first()
         if not b:
             continue
         terjual = row.total_terjual or 0

@@ -506,7 +506,7 @@ class AuditMiddleware:
             return
 
         method = scope.get("method", "").upper()
-        if scope.get("type") != "http" or method not in AUDITED_METHODS:
+        if scope.get("type") != "http" or method not in {*AUDITED_METHODS, "GET"}:
             await self.app(scope, receive, send)
             return
 
@@ -567,8 +567,10 @@ class AuditMiddleware:
                     path = scope.get("path", "")
                     state = scope.get("state", {})
                     audit_override = state.get("audit_override")
-                    should_audit = not state.get("audit_skip") and not (
-                        path.startswith("/api/chatbot") and audit_override is None
+                    should_audit = (
+                        not state.get("audit_skip")
+                        and (method != "GET" or audit_override is not None)
+                        and not (path.startswith("/api/chatbot") and audit_override is None)
                     )
                     source_ip = None
                     if should_audit:
@@ -613,7 +615,7 @@ class AuditMiddleware:
                             "user_id": state.get("audit_user_id"),
                             "username": state.get("audit_username"),
                             "action": audit_override.get(
-                                "action", AUDITED_METHODS[method]
+                                "action", AUDITED_METHODS.get(method, "READ")
                             ),
                             "http_method": method,
                             "resource": audit_override.get(
