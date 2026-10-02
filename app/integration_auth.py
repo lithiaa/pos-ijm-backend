@@ -34,7 +34,12 @@ def require_integration_key(
             except (JWTError, TypeError, ValueError):
                 user = None
 
-            if user and user.role in ALLOWED_ROLES:
+            if (
+                user
+                and user.status == "active"
+                and user.role in ALLOWED_ROLES
+                and (user.environment is None or user.environment.status == "active")
+            ):
                 request.state.audit_user_id = user.id
                 request.state.audit_username = user.username
                 return

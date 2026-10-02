@@ -3,7 +3,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import LoginRequest, TokenResponse
-from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from app.auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_user,
+    get_current_principal,
+    AuthPrincipal,
+)
 
 router = APIRouter(tags=["auth"])
 
@@ -13,10 +20,26 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == req.username).first()
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Username atau password salah")
+    if user.status != "active":
+        raise HTTPException(status_code=401, detail="User account is disabled")
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(access_token=token)
 
 
 @router.get("/api/auth/me")
-def get_me(user: User = Depends(get_current_user)):
-    return {"id": user.id, "username": user.username, "nama": user.nama, "role": user.role}
+def get_me(principal: AuthPrincipal = Depends(get_current_principal)):
+    user = principal.user
+    env = principal.environment
+    env_data = (
+        {"id": env.id, "name": env.name, "status": env.status}
+        if env is not None
+        else None
+    )
+    return {
+        "id": user.id,
+        "username": user.username,
+        "nama": user.nama,
+        "role": user.role,
+        "environment": env_data,
+        "permissions": principal.permissions,
+    }
