@@ -609,6 +609,7 @@ class AuditMiddleware:
                                 content_length=content_length,
                             )
                         entry = {
+                            "environment_id": state.get("audit_environment_id"),
                             "user_id": state.get("audit_user_id"),
                             "username": state.get("audit_username"),
                             "action": audit_override.get(

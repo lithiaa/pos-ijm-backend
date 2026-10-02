@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_env_id
 from app.database import get_db
 from app.models.barang import Barang, BarangFoto
 
@@ -74,7 +74,7 @@ def add_photo(db: Session, barang_id: int, filename: str, primary: bool = False)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
     photos = db.query(BarangFoto).filter_by(barang_id=barang_id).order_by(BarangFoto.urutan, BarangFoto.id).all()
-    photo = BarangFoto(barang_id=barang_id, filename=filename, urutan=len(photos))
+    photo = BarangFoto(environment_id=barang.environment_id, barang_id=barang_id, filename=filename, urutan=len(photos))
     db.add(photo)
     db.flush()
     if primary:
@@ -109,8 +109,16 @@ async def append_photo(barang_id: int, file: UploadFile = File(...), db: Session
 
 
 @router.delete("/api/barang/{barang_id}/photos/{photo_id}")
-def delete_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    photo = db.query(BarangFoto).filter_by(id=photo_id, barang_id=barang_id).first()
+def delete_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    barang_query = db.query(Barang).filter(Barang.id == barang_id)
+    if isinstance(env_id, int):
+        barang_query = barang_query.filter(Barang.environment_id == env_id)
+    barang = barang_query.first()
+    if not barang: raise HTTPException(status_code=404, detail="Barang not found")
+    photo_query = db.query(BarangFoto).filter_by(id=photo_id, barang_id=barang_id)
+    if isinstance(env_id, int):
+        photo_query = photo_query.filter(BarangFoto.environment_id == env_id)
+    photo = photo_query.first()
     if not photo: raise HTTPException(status_code=404, detail="Foto not found")
     filename = photo.filename
     db.delete(photo); db.flush()

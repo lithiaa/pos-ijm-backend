@@ -6,7 +6,8 @@ from app.models.transaksi import StokSaatIni, TransaksiStok
 
 
 def record_stock_in(db: Session, *, barang_id: int, jumlah: int, harga_satuan: int | None,
-                    keterangan: str | None, user_id: int | None, supplier_id: int | None):
+                    keterangan: str | None, user_id: int | None, supplier_id: int | None,
+                    environment_id: int | None = None):
     """Caller owns transaction. MySQL row lock prevents conflicting tally/primary decisions."""
     query = select(Barang).where(Barang.id == barang_id)
     if db.bind.dialect.name in {"mysql", "mariadb"}:
@@ -18,10 +19,10 @@ def record_stock_in(db: Session, *, barang_id: int, jumlah: int, harga_satuan: i
         return barang, None
     stok = db.get(StokSaatIni, barang_id)
     if not stok:
-        stok = StokSaatIni(barang_id=barang_id, jumlah=0)
+        stok = StokSaatIni(environment_id=environment_id or barang.environment_id, barang_id=barang_id, jumlah=0)
         db.add(stok)
     stok.jumlah += jumlah
-    tx = TransaksiStok(barang_id=barang_id, jenis="masuk", jumlah=jumlah,
+    tx = TransaksiStok(environment_id=environment_id or barang.environment_id, barang_id=barang_id, jenis="masuk", jumlah=jumlah,
         harga_satuan=harga_satuan, total_harga=(harga_satuan * jumlah if harga_satuan is not None else None),
         keterangan=keterangan, user_id=user_id, supplier_id=supplier_id)
     db.add(tx)

@@ -5,6 +5,7 @@ class PrintJob(Base):
     __tablename__ = "print_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
+    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)
     barang_id = Column(Integer, ForeignKey("barang.id"))
     qty = Column(Integer, default=1)
     status = Column(String(20), default="pending")

@@ -38,6 +38,12 @@ class AuditLog(Base):
         primary_key=True,
         autoincrement=True,
     )
+    environment_id = Column(
+        Integer,
+        ForeignKey("environments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at = Column(
         DateTime,
         nullable=False,

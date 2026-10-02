@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.integration_auth import require_integration_key
+from app.integration_auth import get_integration_env_id, require_integration_key
 from app.models.supplier import Supplier
 from app.schemas.integration_supplier import (
     IntegrationSupplierDropdownOut,
@@ -19,9 +19,12 @@ router = APIRouter(
 
 
 @router.get("", response_model=IntegrationSupplierListResponse)
-def list_integration_suppliers(db: Session = Depends(get_db)):
+def list_integration_suppliers(request: Request, db: Session = Depends(get_db)):
+    query = db.query(Supplier)
+    if (env_id := get_integration_env_id(request)) is not None:
+        query = query.filter(Supplier.environment_id == env_id)
     suppliers = (
-        db.query(Supplier)
+        query
         .order_by(
             func.lower(func.coalesce(Supplier.kode_supplier, "")),
             func.lower(Supplier.nama),

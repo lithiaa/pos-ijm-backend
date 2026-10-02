@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_env_id
 from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.schemas.audit_log import AuditLogListResponse
@@ -78,8 +78,9 @@ def list_logs(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
+    env_id: int = Depends(get_current_user_env_id),
 ):
-    query = db.query(AuditLog)
+    query = db.query(AuditLog).filter((AuditLog.environment_id == env_id) | AuditLog.environment_id.is_(None))
     term = (q or "").strip()
     if term:
         contains = f"%{term}%"

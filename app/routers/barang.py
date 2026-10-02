@@ -15,17 +15,20 @@ from app.models.transaksi import (
 )
 from app.schemas.barang import BarangCreate, BarangUpdate, BarangOut, BarangListResponse, BarangSupplierOut, BarangPhotoOut
 from app.schemas.supplier import SupplierOut
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_env_id
 from app.services.harga import harga_encode, harga_decode
 from app.routers.upload import STORAGE_DIR, _locked_barang, remove_unreferenced_file
 
 router = APIRouter(prefix="/api/barang", tags=["barang"])
 
 
-def _validate_supplier_id(db: Session, req: BarangCreate | BarangUpdate) -> None:
+def _validate_supplier_id(db: Session, req: BarangCreate | BarangUpdate, env_id: int) -> None:
     supplied = req.model_fields_set
     if "supplier_id" in supplied and req.supplier_id is not None:
-        if not db.get(Supplier, req.supplier_id):
+        supplier = db.query(Supplier).filter(
+            Supplier.id == req.supplier_id, Supplier.environment_id == env_id
+        ).first()
+        if not supplier:
             raise HTTPException(status_code=422, detail="Supplier tidak ditemukan")
 
 
@@ -101,6 +104,7 @@ def list_barang(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
+    env_id: int = Depends(get_current_user_env_id),
 ):
     sortable = {
         "id": Barang.id,
@@ -115,7 +119,7 @@ def list_barang(
     order_col = sortable.get(sort_by, Barang.id)
     order = order_col.asc() if str(sort_order).upper() != "DESC" else order_col.desc()
     stock = func.coalesce(StokSaatIni.jumlah, 0)
-    query = db.query(Barang).outerjoin(StokSaatIni)
+    query = db.query(Barang).filter((Barang.environment_id == env_id) | Barang.environment_id.is_(None)).outerjoin(StokSaatIni)
 
     term = (q or search or "").strip()
     if term:
@@ -153,8 +157,8 @@ def list_barang(
 
 
 @router.get("/stok-menipis")
-def stok_menipis(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    q = db.query(Barang).options(joinedload(Barang.stok)).all()
+def stok_menipis(db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    q = db.query(Barang).filter(Barang.environment_id == env_id).options(joinedload(Barang.stok)).all()
     result = []
     for b in q:
         stok = b.stok.jumlah if b.stok else 0
@@ -164,19 +168,19 @@ def stok_menipis(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
 
 @router.get("/{barang_id}")
-def detail_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def detail_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     b = db.query(Barang).options(
         joinedload(Barang.supplier), joinedload(Barang.stok),
         joinedload(Barang.supplier_links).joinedload(BarangSupplier.supplier), joinedload(Barang.photos),
-    ).filter(Barang.id == barang_id).first()
+    ).filter(Barang.id == barang_id, Barang.environment_id == env_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
     return _barang_to_out(b)
 
 
 @router.post("")
-def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    _validate_supplier_id(db, req)
+def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    _validate_supplier_id(db, req, env_id)
     if req.harga_jual is not None:
         harga_jual = req.harga_jual
     else:
@@ -189,6 +193,7 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
         sku = f"{prefix}-{count:04d}"
 
     b = Barang(
+        environment_id=env_id,
         sku=sku,
         nama=req.nama,
         merek=req.merek,
@@ -219,11 +224,11 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
 
 
 @router.put("/{barang_id}")
-def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    b = db.query(Barang).filter(Barang.id == barang_id).first()
+def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    b = db.query(Barang).filter(Barang.id == barang_id, Barang.environment_id == env_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
-    _validate_supplier_id(db, req)
+    _validate_supplier_id(db, req, env_id)
 
     # Update fields explicitly provided
     for field in req.model_fields_set:
@@ -252,10 +257,11 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
 
 
 @router.delete("/{barang_id}")
-def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    b = _locked_barang(db, barang_id)
+def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
+    b = db.query(Barang).filter(Barang.id == barang_id, Barang.environment_id == env_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
+    b = _locked_barang(db, barang_id)
     photo_filenames = {photo.filename for photo in b.photos}
     if b.foto:
         photo_filenames.add(b.foto)

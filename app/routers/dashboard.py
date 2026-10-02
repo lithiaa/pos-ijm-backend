@@ -5,21 +5,21 @@ from app.database import get_db
 from app.models.barang import Barang
 from app.models.transaksi import StokSaatIni, TransaksiStok
 from app.schemas.stok import DashboardResponse, TransaksiOut
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_env_id
 from datetime import date
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.get("")
-def dashboard(db: Session = Depends(get_db), user=Depends(get_current_user)):
+def dashboard(db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     today = str(date.today())
 
-    total_barang = db.query(func.count(Barang.id)).scalar() or 0
+    total_barang = db.query(func.count(Barang.id)).filter(Barang.environment_id == env_id).scalar() or 0
     stok_menipis = 0
     barang_menipis_list = []
 
-    all_barang = db.query(Barang).options(joinedload(Barang.stok)).all()
+    all_barang = db.query(Barang).filter(Barang.environment_id == env_id).options(joinedload(Barang.stok)).all()
     for b in all_barang:
         stok = b.stok.jumlah if b.stok else 0
         if stok <= b.stok_minimum:
@@ -34,16 +34,18 @@ def dashboard(db: Session = Depends(get_db), user=Depends(get_current_user)):
     grafik = barang_menipis_list[:10]
 
     barang_masuk = db.query(func.count(TransaksiStok.id)).filter(
+        TransaksiStok.environment_id == env_id,
         TransaksiStok.jenis == "masuk",
         TransaksiStok.created_at >= f"{today} 00:00:00",
     ).scalar() or 0
 
     barang_keluar = db.query(func.count(TransaksiStok.id)).filter(
+        TransaksiStok.environment_id == env_id,
         TransaksiStok.jenis == "keluar",
         TransaksiStok.created_at >= f"{today} 00:00:00",
     ).scalar() or 0
 
-    txs = db.query(TransaksiStok).options(
+    txs = db.query(TransaksiStok).filter(TransaksiStok.environment_id == env_id).options(
         joinedload(TransaksiStok.barang), joinedload(TransaksiStok.user)
     ).order_by(TransaksiStok.created_at.desc()).limit(5).all()
 

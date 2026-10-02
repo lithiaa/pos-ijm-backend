@@ -5,9 +5,11 @@ from app.database import Base
 
 class Barang(Base):
     __tablename__ = "barang"
+    __table_args__ = (UniqueConstraint("environment_id", "sku", name="uq_barang_env_sku"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    sku = Column(String(50), unique=True, index=True)
+    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)
+    sku = Column(String(50), index=True)
     nama = Column(String(200))
     merek = Column(String(100), nullable=True)
     foto = Column(String(255), nullable=True)  # legacy alias for primary gallery photo
@@ -32,6 +34,7 @@ class BarangSupplier(Base):
     __tablename__ = "barang_supplier"
     __table_args__ = (CheckConstraint("jumlah_masuk_kumulatif >= 0", name="ck_barang_supplier_nonnegative"),)
 
+    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)
     barang_id = Column(Integer, ForeignKey("barang.id", ondelete="CASCADE"), primary_key=True)
     supplier_id = Column(Integer, ForeignKey("supplier.id", ondelete="RESTRICT"), primary_key=True)
     jumlah_masuk_kumulatif = Column(BigInteger, nullable=False, default=0, server_default="0")
@@ -47,6 +50,7 @@ class BarangFoto(Base):
     __table_args__ = (UniqueConstraint("barang_id", "urutan", name="uq_barang_foto_order"),)
 
     id = Column(Integer, primary_key=True, index=True)
+    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)
     barang_id = Column(Integer, ForeignKey("barang.id", ondelete="CASCADE"), nullable=False, index=True)
     filename = Column(String(255), nullable=False)
     urutan = Column(Integer, nullable=False)

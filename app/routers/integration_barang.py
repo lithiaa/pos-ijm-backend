@@ -1,7 +1,8 @@
 import os
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
+from app.integration_auth import get_integration_env_id
 from sqlalchemy import case, func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -195,6 +196,7 @@ def _add_stock_transaction(
 
 @router.get("", response_model=IntegrationBarangListResponse)
 def list_integration_barang(
+    request: Request,
     q: str | None = None,
     supplier_id: int | None = None,
     stok_status: Literal["aman", "menipis", "habis"] | None = None,
@@ -204,6 +206,8 @@ def list_integration_barang(
 ):
     stock = func.coalesce(StokSaatIni.jumlah, 0)
     query = db.query(Barang).outerjoin(StokSaatIni)
+    if (env_id := get_integration_env_id(request)) is not None:
+        query = query.filter(Barang.environment_id == env_id)
     term = (q or "").strip()
     if term:
         contains = f"%{_escape_like(term.lower())}%"

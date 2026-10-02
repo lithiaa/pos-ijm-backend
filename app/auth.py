@@ -207,6 +207,7 @@ def get_current_principal(
 
     request.state.audit_user_id = user.id
     request.state.audit_username = user.username
+    request.state.audit_environment_id = user.environment_id
     return principal
 
 
@@ -216,6 +217,24 @@ def get_current_user(
     user = principal.user
     user.effective_environment = principal.environment
     return user
+
+
+def get_current_user_env_id(
+    principal: AuthPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> int:
+    """Return server-resolved environment ID for a domain route."""
+    if principal.environment is not None:
+        return principal.environment.id
+    if principal.is_platform_owner:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Environment required")
+    legacy = db.query(Environment).filter(Environment.slug == "lithia-autoparts").first()
+    if legacy is None:
+        legacy = Environment(slug="lithia-autoparts", name="Lithia Autoparts", status="active")
+        db.add(legacy)
+        db.commit()
+        db.refresh(legacy)
+    return legacy.id
 
 
 def require_permission(permission: str):

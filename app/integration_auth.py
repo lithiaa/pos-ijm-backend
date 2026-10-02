@@ -12,6 +12,10 @@ from config import ALGORITHM, POS_INTEGRATION_KEY, SECRET_KEY
 ALLOWED_ROLES = {"admin", "karyawan"}
 
 
+def get_integration_env_id(request: Request) -> int | None:
+    return getattr(request.state, "integration_env_id", None)
+
+
 def require_integration_key(
     request: Request,
     authorization: Annotated[
@@ -42,6 +46,8 @@ def require_integration_key(
             ):
                 request.state.audit_user_id = user.id
                 request.state.audit_username = user.username
+                request.state.audit_environment_id = user.environment_id
+                request.state.integration_env_id = user.environment_id
                 return
 
     supplied = (x_integration_key or "").encode("utf-8")
