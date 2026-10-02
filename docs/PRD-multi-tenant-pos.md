@@ -13,7 +13,8 @@ Lithia POS saat ini berisi data inventori sparepart dalam satu lingkungan. PRD i
 
 Setiap environment memiliki Administrator sendiri. Administrator mengelola data bisnisnya dan dapat membuat user lain untuk membantu mengelola barang serta stok. User dari satu environment tidak boleh melihat atau mengubah data environment lain.
 
-Data sparepart saat ini dipertahankan sebagai environment lama bernama `Lithia Autoparts`.
+Data sparepart saat ini dipertahankan sebagai environment lama bernama `Lithia Autoparts`. Katalog publik di `catalog.lithiaproject.site` hanya menampilkan data `Lithia Autoparts`; environment lain tidak pernah masuk katalog publik.
+
 
 ---
 
@@ -169,6 +170,7 @@ Administrator selalu memiliki semua permission dalam environment sendiri. Staff 
 | F-10 | Audit multi-environment | Semua aksi admin/user mencatat environment | P0 |
 | F-11 | Foto dan file isolation | Foto hanya dapat diakses melalui object milik environment | P0 |
 | F-12 | Backup/restore isolation | Backup menyimpan environment ID dan restore tidak mencampur data | P1 |
+| F-12a | Public catalog isolation | `catalog.lithiaproject.site` dan endpoint katalog publik hanya melayani `Lithia Autoparts`; environment lain selalu unpublished dan tidak pernah diekspos | P0 |
 
 ### Post-MVP
 
@@ -327,6 +329,15 @@ POST /api/users/{id}/disable          # admin environment
 POST /api/users/{id}/reset-password    # admin environment
 ```
 
+### Katalog publik
+
+```text
+GET /api/public/catalog                  # tanpa autentikasi; hanya `Lithia Autoparts`
+GET /api/public/catalog/{id}             # tanpa autentikasi; hanya resource `Lithia Autoparts`
+```
+
+Host `catalog.lithiaproject.site` hanya memakai endpoint katalog publik ini. Backend menetapkan scope `Lithia Autoparts` dari konfigurasi server/identifier internal tetap, bukan dari host header, query parameter, cookie, path, atau input client. Tidak ada endpoint publik untuk memilih, mencantumkan, atau menerbitkan environment. Endpoint publik wajib memberi `404` untuk resource yang bukan milik `Lithia Autoparts`, termasuk ID yang valid dari environment lain.
+
 ### Session
 
 ```text
@@ -389,8 +400,10 @@ Environment baru menampilkan:
 6. Jalankan test isolasi: user lama tetap melihat seluruh data lama; environment baru melihat nol data.
 7. Deploy backend dengan read/write scope.
 8. Deploy frontend.
-9. Smoke test login, Barang, Stok Masuk, Stok Keluar, Foto, Supplier, Logs.
-10. Simpan backup sampai verifikasi produksi selesai.
+9. Konfigurasikan scope katalog publik tetap ke ID `Lithia Autoparts`; jangan backfill atau buat flag publish untuk environment lain.
+10. Smoke test login, Barang, Stok Masuk, Stok Keluar, Foto, Supplier, Logs, serta endpoint dan host `catalog.lithiaproject.site`.
+11. Verifikasi endpoint katalog publik hanya mengembalikan data `Lithia Autoparts` dan memberi `404` untuk ID environment lain.
+12. Simpan backup sampai verifikasi produksi selesai.
 
 Tidak boleh ada data lama yang dipindahkan manual tanpa query terukur dan hasil sebelum/sesudah.
 
@@ -414,6 +427,14 @@ Tidak boleh ada data lama yang dipindahkan manual tanpa query terukur dan hasil 
 - [ ] User environment A tidak dapat mengubah atau menghapus resource environment B.
 - [ ] File foto tidak dapat diakses lintas environment melalui manipulasi filename/path.
 - [ ] Test otomatis mencakup positive dan negative cross-environment access.
+
+### Katalog publik
+
+- [ ] `catalog.lithiaproject.site` hanya menampilkan barang/foto yang terikat ke `Lithia Autoparts`.
+- [ ] Semua environment baru default unpublished tanpa UI, API, query parameter, atau mutation publik untuk mengubahnya.
+- [ ] Endpoint katalog publik tidak dapat memilih atau mencantumkan environment dan tidak menerima scope environment dari input client.
+- [ ] Request endpoint katalog publik dengan ID resource environment lain mengembalikan `404` tanpa metadata, foto, atau detail environment tersebut.
+- [ ] Test otomatis memverifikasi daftar dan detail katalog hanya mengembalikan `Lithia Autoparts` saat ada beberapa environment.
 
 ### User management
 
@@ -468,6 +489,7 @@ Tidak boleh ada data lama yang dipindahkan manual tanpa query terukur dan hasil 
 | Ada endpoint terlewat dari scope | Data bocor lintas environment | Inventory semua router + negative isolation tests + code review |
 | Backfill salah environment | Data bisnis tercampur | Backup, dry-run, count/hash sebelum-sesudah |
 | File foto tetap global | Foto dapat ditebak/diakses lintas tenant | Path ber-prefix environment + authorization/static policy |
+| Katalog publik mendapat scope dari client atau memuat semua environment | Data toko lain terekspos pada `catalog.lithiaproject.site` | Scope server-side tetap ke `Lithia Autoparts`; tanpa discovery/publish endpoint; test daftar/detail negatif |
 | Admin dapat membuat tenant tanpa kontrol | Environment liar dan biaya naik | MVP batasi provisioning ke Platform Owner |
 | Copy memakai raw ID atau DB clone | Relasi lintas toko, data bocor, retry duplikat | Job snapshot dengan ID baru, mapping FK, idempotency, dan audit |
 | Copy membawa inventori/transaksi tanpa sengaja | Saldo awal dan riwayat salah | Default inventori 0; transaksi tidak pernah default copy; opt-in eksplisit untuk inventori |
@@ -541,6 +563,7 @@ Tidak boleh ada data lama yang dipindahkan manual tanpa query terukur dan hasil 
 8. **Environment sparepart lama:** `Lithia Autoparts`.
 9. **UI Platform Owner:** wajib ada, untuk provisioning, status toko, dan support access.
 10. **Support access Platform Owner:** diizinkan hanya untuk kebutuhan support, reason-bound, time-bound, scoped, dan diaudit penuh.
+11. **Katalog publik:** `catalog.lithiaproject.site` hanya untuk `Lithia Autoparts`. Semua environment lain default unpublished dan tidak pernah tampil atau dapat dipilih melalui katalog publik maupun endpoint katalog publik.
 
 ---
 
