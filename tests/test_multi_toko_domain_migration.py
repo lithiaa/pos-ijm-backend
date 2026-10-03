@@ -15,23 +15,38 @@ def load_migration():
 class Result:
     def __init__(self, value=None): self.value = value
     def scalar(self): return self.value
-    def fetchall(self): return []
+    def fetchall(self): return self.value if isinstance(self.value, list) else []
 
 
 class FakeMySQL:
     class Dialect: name = "mysql"
     def __init__(self):
-        self.dialect = self.Dialect(); self.columns = set(); self.indexes = set(); self.sql = []
+        self.dialect = self.Dialect(); self.columns = set(); self.indexes = set(); self.foreign_keys = set(); self.sql = []
+        self.legacy_indexes = {
+            ("barang", "legacy_barang_sku"),
+            ("supplier", "legacy_supplier_kode"),
+            ("integration_stock_operations", "legacy_iso_operation"),
+        }
     def execute(self, statement, params=None):
         sql = str(statement); self.sql.append(sql)
         if "SELECT DATABASE()" in sql: return Result("pos")
         if "FROM environments" in sql: return Result(1)
         if "information_schema.COLUMNS" in sql:
             return Result(int(((params or {}).get("t"), (params or {}).get("c")) in self.columns))
+        if "information_schema.TABLE_CONSTRAINTS" in sql:
+            return Result(int(((params or {}).get("t"), (params or {}).get("n")) in self.foreign_keys))
         if "information_schema.STATISTICS" in sql:
+            if "GROUP BY INDEX_NAME" in sql:
+                table = (params or {}).get("t")
+                column = (params or {}).get("c")
+                return Result([name for candidate, name in self.legacy_indexes if candidate == table and ((table == "barang" and column == "sku") or (table == "supplier" and column == "kode_supplier") or (table == "integration_stock_operations" and column == "operation_id"))])
             return Result(int(((params or {}).get("t"), (params or {}).get("n")) in self.indexes))
         if "ADD COLUMN environment_id" in sql:
             table = sql.split("`")[1]; self.columns.add((table, "environment_id"))
+        if "DROP INDEX" in sql:
+            parts = sql.split("`"); self.legacy_indexes.discard((parts[1], parts[3]))
+        if "ADD CONSTRAINT" in sql:
+            parts = sql.split("`"); self.foreign_keys.add((parts[1], parts[3]))
         if "ADD INDEX" in sql or "ADD UNIQUE INDEX" in sql:
             parts = sql.split("`"); self.indexes.add((parts[1], parts[3]))
         return Result()
@@ -73,6 +88,27 @@ def test_domain_migration_preflights_backfill_then_sets_every_domain_scope_not_n
         duplicate_preflight = f"SELECT COUNT(*) FROM `{table}` GROUP BY {columns} HAVING COUNT(*) > 1"
         not_null = f"ALTER TABLE `{table}` MODIFY COLUMN environment_id INT NOT NULL"
         assert sql.index(duplicate_preflight) < sql.index(not_null), name
+
+
+def test_domain_migration_preflights_environment_references_adds_foreign_keys_and_drops_discovered_legacy_uniques():
+    migration = load_migration(); conn = FakeMySQL()
+    migration._migrate_connection(conn)
+    sql = "\n".join(conn.sql)
+    for table in migration.TABLES:
+        reference_preflight = f"SELECT COUNT(*) FROM `{table}` d LEFT JOIN environments e ON e.id = d.environment_id WHERE e.id IS NULL"
+        foreign_key = f"fk_{table}_environment_id"
+        assert reference_preflight in sql
+        assert f"ADD CONSTRAINT `{foreign_key}` FOREIGN KEY (environment_id) REFERENCES environments(id)" in sql
+        assert sql.index(reference_preflight) < sql.index(f"ADD CONSTRAINT `{foreign_key}`")
+    for table, legacy in (
+        ("barang", "legacy_barang_sku"),
+        ("supplier", "legacy_supplier_kode"),
+        ("integration_stock_operations", "legacy_iso_operation"),
+    ):
+        assert f"ALTER TABLE `{table}` DROP INDEX `{legacy}`" in sql
+    before = len(conn.sql)
+    migration._migrate_connection(conn)
+    assert not any("DROP INDEX" in statement or "ADD CONSTRAINT" in statement for statement in conn.sql[before:])
 
 
 def test_domain_migration_refuses_sqlite():

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
+from config import CORS_ORIGINS
 from app.audit import AuditMiddleware
 from app.models.audit_log import AuditLog
 from app.models.admin import EnvironmentCopyJob, Invitation, ProvisionRequest, SupportGrant
@@ -31,7 +32,7 @@ app = FastAPI(title="Toko Sparepart API", version="1.0.0")
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

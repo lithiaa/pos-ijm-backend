@@ -52,6 +52,49 @@ class CapturingInviter:
         )
 
 
+def test_platform_owner_lists_minimal_toko_metadata_without_support_grant(client, db):
+    owner = _owner(db)
+    db.query(Environment).filter_by(slug="lithia-autoparts").delete()
+    db.commit()
+    first = Environment(
+        slug="list-one", name="List One", status="active", address="Private address",
+        phone="Private phone", label_config='{"private": true}',
+    )
+    second = Environment(slug="list-two", name="List Two", status="suspended")
+    db.add_all([first, second])
+    db.flush()
+    db.add_all([
+        User(username="list-admin-one", password_hash="x", nama="Admin One", email="one@example.test", role="admin", environment_id=first.id, status="active"),
+        User(username="list-admin-two", password_hash="x", nama="Admin Two", email="two@example.test", role="admin", environment_id=second.id, status="pending"),
+    ])
+    db.commit()
+
+    response = client.get("/api/environments?page=1&limit=1", headers=_headers(owner))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 2
+    assert body["page"] == 1
+    assert body["limit"] == 1
+    assert body["data"] == [{
+        "id": first.id, "slug": "list-one", "name": "List One", "status": "active",
+        "administrator": {"id": first.users[0].id, "username": "list-admin-one", "name": "Admin One", "email": "one@example.test", "status": "active"},
+    }]
+    assert "address" not in response.text
+    assert "label_config" not in response.text
+
+
+def test_environment_list_requires_platform_owner(client, db):
+    environment = Environment(slug="list-denied", name="Denied", status="active")
+    db.add(environment)
+    db.flush()
+    admin = User(username="list-local-admin", password_hash="x", nama="Local", role="admin", environment_id=environment.id, status="active")
+    db.add(admin)
+    db.commit()
+
+    assert client.get("/api/environments", headers=_headers(admin)).status_code == 403
+
+
 def test_platform_owner_provisions_toko_and_admin_idempotently(client, db):
     from app.invites import get_inviter
     from app.models.admin import Invitation, ProvisionRequest

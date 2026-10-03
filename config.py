@@ -14,6 +14,7 @@ SECRET_KEY = os.getenv("SECRET_KEY") or (token_urlsafe(48) if APP_ENV in {"devel
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 POS_INTEGRATION_KEY = os.getenv("POS_INTEGRATION_KEY", "")
+CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if origin.strip()]
 AUDIT_TRUSTED_PROXIES = os.getenv("AUDIT_TRUSTED_PROXIES", "")
 INVITE_SMTP_HOST = os.getenv("INVITE_SMTP_HOST", "")
 INVITE_SMTP_PORT = int(os.getenv("INVITE_SMTP_PORT", "25"))
@@ -42,6 +43,8 @@ def _validate_production_config() -> None:
         POS_INTEGRATION_KEY.lower() in predictable or len(POS_INTEGRATION_KEY) < 32
     ):
         invalid.append("POS_INTEGRATION_KEY")
+    if not os.getenv("CORS_ORIGINS") or not CORS_ORIGINS or "*" in CORS_ORIGINS:
+        invalid.append("CORS_ORIGINS")
     for name in ("ADMIN_USERNAME", "ADMIN_PASSWORD"):
         if os.getenv(name):
             invalid.append(name)

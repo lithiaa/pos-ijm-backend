@@ -23,19 +23,46 @@ def _require_owner(principal: AuthPrincipal) -> None:
         raise HTTPException(status_code=403, detail="Platform Owner required")
 
 
-def _response(environment: Environment, admin: User) -> dict:
+def _response(environment: Environment, admin: User | None) -> dict:
     return {
         "id": environment.id,
         "slug": environment.slug,
         "name": environment.name,
         "status": environment.status,
-        "administrator": {
+        "administrator": None if admin is None else {
             "id": admin.id,
             "username": admin.username,
             "name": admin.nama,
             "email": admin.email,
             "status": admin.status,
         },
+    }
+
+
+@router.get("")
+def list_environments(
+    page: int = 1,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    _require_owner(principal)
+    if page < 1 or not 1 <= limit <= 100:
+        raise HTTPException(status_code=422, detail="Invalid pagination")
+    query = db.query(Environment).order_by(Environment.id)
+    total = query.count()
+    environments = query.offset((page - 1) * limit).limit(limit).all()
+    administrators = {}
+    for admin in db.query(User).filter(
+        User.environment_id.in_([environment.id for environment in environments]),
+        User.role == "admin",
+    ).order_by(User.id):
+        administrators.setdefault(admin.environment_id, admin)
+    return {
+        "data": [_response(environment, administrators.get(environment.id)) for environment in environments],
+        "total": total,
+        "page": page,
+        "limit": limit,
     }
 
 
