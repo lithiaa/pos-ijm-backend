@@ -53,6 +53,28 @@ def test_domain_migration_adds_and_backfills_all_tables_idempotently():
     assert not any("ADD COLUMN" in sql for sql in conn.sql[before:])
 
 
+def test_domain_migration_preflights_backfill_then_sets_every_domain_scope_not_null():
+    migration = load_migration(); conn = FakeMySQL()
+    migration._migrate_connection(conn)
+    sql = "\n".join(conn.sql)
+    for table in migration.TABLES:
+        backfill = f"UPDATE `{table}` SET environment_id"
+        preflight = f"SELECT COUNT(*) FROM `{table}` WHERE environment_id IS NULL"
+        not_null = f"ALTER TABLE `{table}` MODIFY COLUMN environment_id INT NOT NULL"
+        assert backfill in sql
+        assert preflight in sql
+        assert not_null in sql
+        assert sql.index(backfill) < sql.index(preflight) < sql.index(not_null)
+    for table, columns, name in (
+        ("barang", "environment_id, sku", "uq_barang_env_sku"),
+        ("supplier", "environment_id, kode_supplier", "uq_supplier_env_kode"),
+        ("integration_stock_operations", "environment_id, operation_id", "uq_iso_env_opid"),
+    ):
+        duplicate_preflight = f"SELECT COUNT(*) FROM `{table}` GROUP BY {columns} HAVING COUNT(*) > 1"
+        not_null = f"ALTER TABLE `{table}` MODIFY COLUMN environment_id INT NOT NULL"
+        assert sql.index(duplicate_preflight) < sql.index(not_null), name
+
+
 def test_domain_migration_refuses_sqlite():
     migration = load_migration(); conn = FakeMySQL(); conn.dialect.name = "sqlite"
     with pytest.raises(RuntimeError, match="MySQL/MariaDB"):

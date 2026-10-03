@@ -10,6 +10,8 @@ def record_stock_in(db: Session, *, barang_id: int, jumlah: int, harga_satuan: i
                     environment_id: int | None = None):
     """Caller owns transaction. MySQL row lock prevents conflicting tally/primary decisions."""
     query = select(Barang).where(Barang.id == barang_id)
+    if environment_id is not None:
+        query = query.where(Barang.environment_id == environment_id)
     if db.bind.dialect.name in {"mysql", "mariadb"}:
         query = query.with_for_update()
     barang = db.execute(query).scalar_one_or_none()
@@ -17,9 +19,13 @@ def record_stock_in(db: Session, *, barang_id: int, jumlah: int, harga_satuan: i
         return None, None
     if jumlah == 0:
         return barang, None
-    stok = db.get(StokSaatIni, barang_id)
+    env_id = environment_id if environment_id is not None else barang.environment_id
+    stok = db.query(StokSaatIni).filter(
+        StokSaatIni.barang_id == barang_id,
+        StokSaatIni.environment_id == env_id,
+    ).first()
     if not stok:
-        stok = StokSaatIni(environment_id=environment_id or barang.environment_id, barang_id=barang_id, jumlah=0)
+        stok = StokSaatIni(environment_id=env_id, barang_id=barang_id, jumlah=0)
         db.add(stok)
     stok.jumlah += jumlah
     tx = TransaksiStok(environment_id=environment_id or barang.environment_id, barang_id=barang_id, jenis="masuk", jumlah=jumlah,
@@ -29,7 +35,7 @@ def record_stock_in(db: Session, *, barang_id: int, jumlah: int, harga_satuan: i
     if supplier_id is not None:
         link = db.get(BarangSupplier, (barang_id, supplier_id))
         if not link:
-            link = BarangSupplier(barang_id=barang_id, supplier_id=supplier_id, jumlah_masuk_kumulatif=0)
+            link = BarangSupplier(environment_id=env_id, barang_id=barang_id, supplier_id=supplier_id, jumlah_masuk_kumulatif=0)
             db.add(link)
             db.flush()
         link.jumlah_masuk_kumulatif += jumlah

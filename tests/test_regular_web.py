@@ -70,8 +70,10 @@ def test_delete_cleans_print_jobs_and_all_target_dependencies(
     db.get(Barang, target["id"]).foto = "target.jpg"
     db.get(Barang, other["id"]).foto = "other.jpg"
     db.commit()
-    (tmp_path / "target.jpg").write_bytes(b"target")
-    (tmp_path / "other.jpg").write_bytes(b"other")
+    environment_id = db.get(Barang, target["id"]).environment_id
+    (tmp_path / str(environment_id)).mkdir()
+    (tmp_path / str(environment_id) / "target.jpg").write_bytes(b"target")
+    (tmp_path / str(environment_id) / "other.jpg").write_bytes(b"other")
     target_print = PrintJob(barang_id=target["id"], qty=1, status=status)
     other_print = PrintJob(barang_id=other["id"], qty=1, status="done")
     db.add_all(
@@ -106,8 +108,8 @@ def test_delete_cleans_print_jobs_and_all_target_dependencies(
     assert db.get(PrintJob, target_print_id) is None
     assert db.get(Barang, other_id)
     assert db.get(PrintJob, other_print_id)
-    assert (tmp_path / "other.jpg").read_bytes() == b"other"
-    assert not (tmp_path / "target.jpg").exists()
+    assert (tmp_path / str(environment_id) / "other.jpg").read_bytes() == b"other"
+    assert not (tmp_path / str(environment_id) / "target.jpg").exists()
     assert auth.delete(f"/api/barang/{target_id}").status_code == 404
 
 

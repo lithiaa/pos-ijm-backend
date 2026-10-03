@@ -16,6 +16,7 @@ class Environment(Base):
     phone = Column(String(50), nullable=True)
     timezone = Column(String(100), nullable=False, default="Asia/Jakarta", server_default="Asia/Jakarta")
     currency = Column(String(10), nullable=False, default="IDR", server_default="IDR")
+    label_config = Column(String(1000), nullable=False, default='{"default_size":"a4_2col"}', server_default='{"default_size":"a4_2col"}')
     status = Column(String(20), default="active", nullable=False, server_default="active")
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)

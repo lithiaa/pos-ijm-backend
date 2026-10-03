@@ -1,10 +1,16 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.orm import relationship
 from app.database import Base
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "role = 'platform_owner' OR environment_id IS NOT NULL",
+            name="ck_users_environment_or_platform_owner",
+        ).ddl_if(dialect=("mysql", "mariadb")),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)

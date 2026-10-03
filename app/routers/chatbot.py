@@ -1,36 +1,29 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
-import re
-import os
-import uuid
 import base64
-import requests
+import binascii
+import os
+import re
+import uuid
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.auth import AuthPrincipal, get_current_principal, get_current_user_env_id
 from app.database import get_db
 from app.models.barang import Barang
-from app.models.transaksi import StokSaatIni, TransaksiStok
+from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
+from app.models.transaksi import StokSaatIni, TransaksiStok
+from app.routers.upload import MAX_PHOTO_BYTES, STORAGE_DIR as FOTO_STORAGE_DIR
 from app.services.harga import harga_decode, harga_encode
-from app.services.supplier_code import assign_supplier_code
 from app.services.print_client import print_job_async
-from app.routers.upload import STORAGE_DIR as FOTO_STORAGE_DIR
+from app.services.supplier_code import assign_supplier_code
 
-router = APIRouter(
-    prefix="/api/chatbot",
-    tags=["chatbot"],
-)
-
-# Used by chatbot responses that link to external URLs
-API_URL = "https://api.ijm.lithiaproject.site"
+router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
 
 class ChatbotRequest(BaseModel):
     command: str
-
-
-def get_current_user_placeholder():
-    pass
 
 
 def _audit_mutation(
@@ -45,438 +38,329 @@ def _audit_mutation(
     }
 
 
+def _required_permission(action: str) -> str | None:
+    return {
+        "tambah barang": "barang.write",
+        "cari barang": "barang.read",
+        "lihat semua barang": "barang.read",
+        "list barang": "barang.read",
+        "upload foto": "foto.write",
+        "foto barang": "foto.read",
+        "ubah barang": "barang.write",
+        "hapus barang": "barang.delete",
+        "cek stok": "stok.read",
+        "stok menipis": "stok.read",
+        "harga barang": "barang.read",
+        "cetak label": "barang.read",
+        "setelan label": "environment.settings",
+        "stok masuk": "stok.write",
+    }.get(action)
+
+
+def _barang(db: Session, barang_id: int, env_id: int) -> Barang:
+    barang = db.query(Barang).filter(
+        Barang.id == barang_id, Barang.environment_id == env_id
+    ).first()
+    if not barang:
+        raise HTTPException(status_code=404, detail="Barang not found")
+    return barang
+
+
+def _supplier_by_name(db: Session, name: str, env_id: int) -> Supplier | None:
+    return db.query(Supplier).filter(
+        Supplier.nama == name, Supplier.environment_id == env_id
+    ).first()
+
+
+def _parse_id(params: dict[str, str]) -> int:
+    try:
+        return int(params["id"])
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=422, detail="Valid barang ID required")
+
+
+def _save_base64_photo(value: str, env_id: int) -> str:
+    try:
+        data = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid photo data")
+    if not data.startswith(b"\xff\xd8\xff") or len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=422, detail="Photo must be JPEG and at most 5MB")
+    filename = f"{uuid.uuid4()}.jpg"
+    directory = os.path.join(FOTO_STORAGE_DIR, str(env_id))
+    os.makedirs(directory, exist_ok=True)
+    with open(os.path.join(directory, filename), "wb") as output:
+        output.write(data)
+    return filename
+
+
 @router.post("/")
 def process_command(
     req: ChatbotRequest,
     request: Request,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user_placeholder),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    env_id: int = Depends(get_current_user_env_id),
 ):
     request.state.audit_skip = True
     cmd = req.command.strip()
-    response = "Perintah tidak dikenali."
-
-    # Parse action — words before first key=value
     match = re.match(r"(\w[\w\s]*?)\s+(?=\w+=|$)", cmd + " ")
     if not match:
-        return {"response": response}
+        return {"response": "Perintah tidak dikenali."}
 
     action = match.group(1).strip()
+    required = _required_permission(action)
+    if required and not principal.has_permission(required):
+        raise HTTPException(status_code=403, detail=f"Permission '{required}' required")
+
     after = cmd[len(action):].strip()
-
-    params = {}
-    if after:
-        try:
-            # Parse key=value pairs
-            pairs = re.findall(r"(\w+)=([\w\s/:.,?&=#%+-]+?)(?=\s+\w+=|$)", after + " ")
-            params = {k: v.strip() for k, v in pairs}
-
-            if "foto_base64" in after:
-                # Handle potentially long base64 string separately
-                match_b64 = re.search(r"foto_base64=([a-zA-Z0-9+/=]+)", after)
-                if match_b64:
-                    params["foto_base64"] = match_b64.group(1)
-        except Exception as e:
-            return {"response": f"Error parsing parameter: {e}"}
+    pairs = re.findall(r"(\w+)=([\w\s/:.,?&=#%+-]+?)(?=\s+\w+=|$)", after + " ")
+    params = {key: value.strip() for key, value in pairs}
+    if "foto_base64" in after:
+        match_b64 = re.search(r"foto_base64=([a-zA-Z0-9+/=]+)", after)
+        if match_b64:
+            params["foto_base64"] = match_b64.group(1)
     request.state.audit_params = params
 
-    # =============== CREATE ===============
     if action == "tambah barang":
+        nama = params.get("nama")
+        if not nama:
+            return {"response": "Gagal: Parameter 'nama' wajib diisi."}
+        supplier = None
+        if "supplier" in params:
+            supplier = _supplier_by_name(db, params["supplier"], env_id)
+            if not supplier:
+                supplier = Supplier(environment_id=env_id, nama=params["supplier"])
+                db.add(supplier)
+                assign_supplier_code(db, supplier, env_id)
         try:
-            nama = params.get("nama")
-            if not nama:
-                return {"response": "Gagal: Parameter 'nama' wajib diisi."}
-
-            supplier = None
-            if "supplier" in params:
-                supplier = db.query(Supplier).filter(Supplier.nama == params["supplier"]).first()
-                if not supplier:
-                    supplier = Supplier(nama=params["supplier"])
-                    db.add(supplier)
-                    assign_supplier_code(db, supplier)
-
-            # Handle SANGUOERIP price code
-            harga_jual_str = params.get("harga_jual", "0")
-            if not harga_jual_str.isdigit():
-                harga_jual = harga_decode(harga_jual_str)
-            else:
-                harga_jual = float(harga_jual_str)
-
-            harga_modal_str = params.get("harga_modal", "0")
-            if not harga_modal_str.isdigit():
-                harga_modal = harga_decode(harga_modal_str)
-            else:
-                harga_modal = float(harga_modal_str)
-
+            harga_jual_text = params.get("harga_jual", "0")
+            harga_jual = int(harga_jual_text) if harga_jual_text.isdigit() else harga_decode(harga_jual_text)
+            harga_modal_text = params.get("harga_modal", "0")
+            harga_modal = int(harga_modal_text) if harga_modal_text.isdigit() else harga_decode(harga_modal_text)
             new_barang = Barang(
+                environment_id=env_id,
                 nama=nama,
                 merek=params.get("merek"),
                 supplier_id=supplier.id if supplier else None,
-                harga_modal=int(harga_modal),
-                harga_jual=int(harga_jual),
+                harga_modal=harga_modal,
+                harga_jual=harga_jual,
                 stok_minimum=int(params.get("stok_minimum", 5)),
                 satuan=params.get("satuan", "pcs"),
-                foto=params.get("foto"),
             )
             db.add(new_barang)
-            db.commit()
-            db.refresh(new_barang)
-            _audit_mutation(
-                request,
-                action="CREATE",
-                resource="barang",
-                resource_id=new_barang.id,
+            db.flush()
+            stock = StokSaatIni(
+                environment_id=env_id,
+                barang_id=new_barang.id,
+                jumlah=max(0, int(params.get("stok", 0))),
             )
-
-            # Initial stock
-            if "stok" in params:
-                stok_awal = int(params["stok"])
-                if stok_awal > 0:
-                    stok = StokSaatIni(barang_id=new_barang.id, jumlah=stok_awal)
-                    db.add(stok)
-                    db.commit()
-
-            response = f"✅ Berhasil tambah barang: {new_barang.nama} (ID: {new_barang.id})"
-        except Exception as e:
+            db.add(stock)
+            db.commit()
+            _audit_mutation(request, action="CREATE", resource="barang", resource_id=new_barang.id)
+            return {"response": f"✅ Berhasil tambah barang: {new_barang.nama} (ID: {new_barang.id})"}
+        except (TypeError, ValueError):
             db.rollback()
-            response = f"❌ Gagal: {e}"
+            raise HTTPException(status_code=422, detail="Invalid numeric value")
+        except Exception:
+            db.rollback()
+            raise
 
-    # =============== LIST / SEARCH ===============
-    elif action in ("cari barang", "lihat semua barang", "list barang"):
-        q = db.query(Barang)
+    if action in ("cari barang", "lihat semua barang", "list barang"):
+        query = db.query(Barang).filter(Barang.environment_id == env_id)
         if "nama" in params:
-            q = q.filter(Barang.nama.ilike(f"%{params['nama']}%"))
-        barangs = q.all()
-        if not barangs:
-            response = "Barang tidak ditemukan."
-        else:
-            lines = [f"Ditemukan {len(barangs)} barang:"]
-            for b in barangs:
-                stok = db.query(StokSaatIni).filter(StokSaatIni.barang_id == b.id).first()
-                jml = stok.jumlah if stok else 0
-                foto_info = "Ada foto" if b.foto else "Tanpa foto"
-                lines.append(f"• ID:{b.id} {b.nama} | Rp{b.harga_jual:,} | Stok:{jml} {b.satuan} | {foto_info}")
-            response = "\n".join(lines)
-
-    # =============== UPLOAD FOTO ===============
-    elif action == "upload foto":
-        if "id" not in params:
-            return {"response": "Gagal: ID barang diperlukan."}
-
-        try:
-            barang_id = int(params["id"])
-            barang = db.query(Barang).filter(Barang.id == barang_id).first()
-            if not barang:
-                return {"response": f"Barang ID {barang_id} tidak ditemukan."}
-
-            foto_filename = f"{uuid.uuid4()}.jpg"
-            os.makedirs(FOTO_STORAGE_DIR, exist_ok=True)
-
-            if "foto_base64" in params:
-                img_data = base64.b64decode(params["foto_base64"])
-                with open(os.path.join(FOTO_STORAGE_DIR, foto_filename), "wb") as f:
-                    f.write(img_data)
-            elif "url" in params:
-                img_response = requests.get(params["url"], stream=True)
-                img_response.raise_for_status()
-                with open(os.path.join(FOTO_STORAGE_DIR, foto_filename), "wb") as f:
-                    for chunk in img_response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-            else:
-                return {"response": "Gagal: 'foto_base64' atau 'url' parameter harus disediakan."}
-
-            barang.foto = foto_filename
-            db.commit()
-            _audit_mutation(
-                request,
-                action="UPDATE",
-                resource="barang",
-                resource_id=barang.id,
+            query = query.filter(Barang.nama.ilike(f"%{params['nama']}%"))
+        barang_list = query.all()
+        if not barang_list:
+            return {"response": "Barang tidak ditemukan."}
+        lines = [f"Ditemukan {len(barang_list)} barang:"]
+        for item in barang_list:
+            stock = db.query(StokSaatIni).filter(
+                StokSaatIni.barang_id == item.id,
+                StokSaatIni.environment_id == env_id,
+            ).first()
+            quantity = stock.jumlah if stock else 0
+            photo = "Ada foto" if item.foto else "Tanpa foto"
+            lines.append(
+                f"• ID:{item.id} {item.nama} | Rp{item.harga_jual:,} | "
+                f"Stok:{quantity} {item.satuan} | {photo}"
             )
+        return {"response": "\n".join(lines)}
 
-            foto_url = f"/storage/foto-barang/{foto_filename}"
-            response = f"✅ Berhasil upload foto untuk {barang.nama}. URL: {foto_url}"
+    if action == "upload foto":
+        barang = _barang(db, _parse_id(params), env_id)
+        if "foto_base64" not in params:
+            raise HTTPException(status_code=422, detail="foto_base64 required")
+        filename = _save_base64_photo(params["foto_base64"], env_id)
+        barang.foto = filename
+        db.commit()
+        _audit_mutation(request, action="UPDATE", resource="barang", resource_id=barang.id)
+        return {
+            "response": f"✅ Berhasil upload foto untuk {barang.nama}. URL: "
+            f"/api/foto-barang/{env_id}/{filename}"
+        }
 
-        except ValueError:
-            return {"response": "Gagal: ID tidak valid."}
-        except Exception as e:
-            db.rollback()
-            return {"response": f"❌ Gagal upload foto: {e}"}
+    if action == "foto barang":
+        barang = _barang(db, _parse_id(params), env_id)
+        if not barang.foto:
+            return {"response": f"Barang ID {barang.id} ({barang.nama}) tidak memiliki foto."}
+        return {
+            "response": f"Foto untuk {barang.nama} (ID: {barang.id}): "
+            f"/api/foto-barang/{env_id}/{barang.foto}"
+        }
 
-
-
-    # =============== FOTO BARANG ===============
-    elif action == "foto barang":
-        if "id" not in params:
-            return {"response": "Gagal: ID barang diperlukan."}
+    if action == "ubah barang":
+        barang_id = _parse_id(params)
+        barang = _barang(db, barang_id, env_id)
+        allowed = {"nama", "merek", "harga_jual", "harga_modal", "stok_minimum", "satuan", "supplier"}
+        changed = False
         try:
-            barang_id = int(params["id"])
-            barang = db.query(Barang).filter(Barang.id == barang_id).first()
-            if not barang:
-                return {"response": f"Barang ID {barang_id} tidak ditemukan."}
-            if not barang.foto:
-                return {"response": f"Barang ID {barang_id} ({barang.nama}) tidak memiliki foto."}
-
-            foto_url = f"/storage/foto-barang/{barang.foto}"
-            response = f"Foto untuk {barang.nama} (ID: {barang.id}): {foto_url}"
-        except ValueError:
-            return {"response": "Gagal: ID tidak valid."}
-
-
-    # =============== UPDATE ===============
-    elif action == "ubah barang":
-        if "id" not in params:
-            return {"response": "Gagal: ID barang diperlukan."}
-        try:
-            barang_id = int(params["id"])
-        except ValueError:
-            return {"response": "Gagal: ID tidak valid."}
-
-        barang = db.query(Barang).filter(Barang.id == barang_id).first()
-        if not barang:
-            return {"response": f"Barang ID {barang_id} tidak ditemukan."}
-
-        try:
-            changed = False
-            for key, val in params.items():
-                if key == "id":
+            for key, raw_value in params.items():
+                if key not in allowed:
                     continue
-                if key == "harga_jual" or key == "harga_modal":
-                    val_str = str(val)
-                    val = harga_decode(val_str) if not val_str.isdigit() else int(val_str)
-                elif key in {"stok_minimum", "supplier_id"}:
-                    val = int(val)
+                value: object = raw_value
+                if key in {"harga_jual", "harga_modal"}:
+                    value = int(raw_value) if raw_value.isdigit() else harga_decode(raw_value)
+                elif key == "stok_minimum":
+                    value = int(raw_value)
                 if key == "supplier":
-                    sup = db.query(Supplier).filter(Supplier.nama == val).first()
-                    if not sup:
-                        sup = Supplier(nama=val)
-                        db.add(sup)
-                        assign_supplier_code(db, sup)
-                        changed = True
-                    if barang.supplier_id != sup.id:
-                        setattr(barang, "supplier_id", sup.id)
-                        changed = True
-                elif key == "foto":
-                    if getattr(barang, key) != val:
-                        setattr(barang, key, val)
-                        changed = True
-                elif hasattr(barang, key):
-                    if getattr(barang, key) != val:
-                        setattr(barang, key, val)
-                        changed = True
+                    supplier = _supplier_by_name(db, raw_value, env_id)
+                    if not supplier:
+                        supplier = Supplier(environment_id=env_id, nama=raw_value)
+                        db.add(supplier)
+                        assign_supplier_code(db, supplier, env_id)
+                    value = supplier.id
+                    key = "supplier_id"
+                if getattr(barang, key) != value:
+                    setattr(barang, key, value)
+                    changed = True
             if changed:
                 db.commit()
-                _audit_mutation(
-                    request,
-                    action="UPDATE",
-                    resource="barang",
-                    resource_id=barang_id,
-                )
-            response = f"✅ Berhasil ubah barang ID {barang_id}."
-        except Exception as e:
+                _audit_mutation(request, action="UPDATE", resource="barang", resource_id=barang_id)
+            return {"response": f"✅ Berhasil ubah barang ID {barang_id}."}
+        except (TypeError, ValueError):
             db.rollback()
-            response = f"❌ Gagal: {e}"
+            raise HTTPException(status_code=422, detail="Invalid value")
 
-    # =============== DELETE ===============
-    elif action == "hapus barang":
-        if "id" not in params:
-            return {"response": "Gagal: ID barang diperlukan."}
+    if action == "hapus barang":
+        barang_id = _parse_id(params)
+        barang = _barang(db, barang_id, env_id)
+        db.query(TransaksiStok).filter(
+            TransaksiStok.barang_id == barang_id,
+            TransaksiStok.environment_id == env_id,
+        ).delete()
+        db.query(StokSaatIni).filter(
+            StokSaatIni.barang_id == barang_id,
+            StokSaatIni.environment_id == env_id,
+        ).delete()
+        db.delete(barang)
+        db.commit()
+        _audit_mutation(request, action="DELETE", resource="barang", resource_id=barang_id)
+        return {"response": f"✅ Berhasil hapus barang ID {barang_id}."}
+
+    if action == "cek stok":
+        barang = _barang(db, _parse_id(params), env_id)
+        stock = db.query(StokSaatIni).filter(
+            StokSaatIni.barang_id == barang.id,
+            StokSaatIni.environment_id == env_id,
+        ).first()
+        return {"response": f"Stok {barang.nama}: {stock.jumlah if stock else 0} {barang.satuan}"}
+
+    if action == "stok menipis":
+        items = db.query(Barang).join(
+            StokSaatIni,
+            (StokSaatIni.barang_id == Barang.id)
+            & (StokSaatIni.environment_id == env_id),
+        ).filter(
+            Barang.environment_id == env_id,
+            StokSaatIni.jumlah <= Barang.stok_minimum,
+        ).all()
+        if not items:
+            return {"response": "Tidak ada barang dengan stok menipis."}
+        lines = ["Barang stok menipis:"]
+        for item in items:
+            stock = db.query(StokSaatIni).filter(
+                StokSaatIni.barang_id == item.id,
+                StokSaatIni.environment_id == env_id,
+            ).one()
+            lines.append(f"• {item.nama} (ID:{item.id}) Stok:{stock.jumlah} Min:{item.stok_minimum}")
+        return {"response": "\n".join(lines)}
+
+    if action == "harga barang":
+        barang = _barang(db, _parse_id(params), env_id)
+        return {"response": f"Harga {barang.nama}: Rp{barang.harga_jual:,} (Kode: {harga_encode(barang.harga_jual)})"}
+
+    if action == "cetak label":
+        barang = _barang(db, _parse_id(params), env_id)
         try:
-            barang_id = int(params["id"])
-        except ValueError:
-            return {"response": "Gagal: ID tidak valid."}
-
-        barang = db.query(Barang).filter(Barang.id == barang_id).first()
-        if not barang:
-            return {"response": f"Barang ID {barang_id} tidak ditemukan."}
-
-        try:
-            db.query(StokSaatIni).filter(StokSaatIni.barang_id == barang_id).delete()
-            db.delete(barang)
-            db.commit()
-            _audit_mutation(
-                request,
-                action="DELETE",
-                resource="barang",
-                resource_id=barang_id,
-            )
-            response = f"✅ Berhasil hapus barang ID {barang_id}."
-        except Exception as e:
-            db.rollback()
-            response = f"❌ Gagal: {e}"
-
-    # =============== CEK STOK ===============
-    elif action == "cek stok":
-        if "id" in params:
-            barang_id = int(params["id"])
-            stok = db.query(StokSaatIni).filter(StokSaatIni.barang_id == barang_id).first()
-            barang = db.query(Barang).filter(Barang.id == barang_id).first()
-            if barang and stok:
-                response = f"Stok {barang.nama}: {stok.jumlah} {barang.satuan}"
-            elif barang:
-                response = f"Stok {barang.nama}: 0 {barang.satuan}"
-            else:
-                response = f"Barang ID {barang_id} tidak ditemukan."
-        else:
-            response = "Gunakan: cek stok id=1"
-
-    elif action == "stok menipis":
-        barangs = db.query(Barang).join(StokSaatIni).filter(StokSaatIni.jumlah <= Barang.stok_minimum).all()
-        if not barangs:
-            response = "Tidak ada barang dengan stok menipis."
-        else:
-            lines = ["Barang stok menipis:"]
-            for b in barangs:
-                stok = db.query(StokSaatIni).filter(StokSaatIni.barang_id == b.id).first()
-                lines.append(f"• {b.nama} (ID:{b.id}) Stok:{stok.jumlah} Min:{b.stok_minimum}")
-            response = "\n".join(lines)
-
-    # =============== CEK HARGA ===============
-    elif action == "harga barang":
-        if "id" in params:
-            barang_id = int(params["id"])
-            barang = db.query(Barang).filter(Barang.id == barang_id).first()
-            if barang:
-                kode = harga_encode(barang.harga_jual)
-                response = f"Harga {barang.nama}: Rp{barang.harga_jual:,} (Kode: {kode})"
-            else:
-                response = f"Barang ID {barang_id} tidak ditemukan."
-        else:
-            response = "Gunakan: harga barang id=1"
-
-    # =============== CETAK LABEL ===============
-    elif action == "cetak label":
-        if "id" not in params:
-            return {"response": "Gunakan: cetak label id=1 [qty=2] [ukuran=80x40]"}
-
-        try:
-            barang_id = int(params["id"])
             qty = int(params.get("qty", 1))
-            barang = db.query(Barang).filter(Barang.id == barang_id).first()
-            if not barang:
-                return {"response": f"Barang ID {barang_id} tidak ditemukan."}
-
-            from app.models.printjob import PrintJob
-            job = PrintJob(barang_id=barang_id, qty=qty, status="pending")
-            db.add(job)
-            db.commit()
-            _audit_mutation(
-                request,
-                action="CREATE",
-                resource="print-jobs",
-                resource_id=job.id,
-            )
-            try:
-                print_job_async(
-                    nama=barang.nama,
-                    harga_jual=int(barang.harga_jual or 0),
-                    harga_beli=int(barang.harga_modal or 0),
-                    sku=barang.sku or "",
-                    stok=0,
-                    satuan=barang.satuan or "pcs",
-                    qty=qty,
-                )
-            except Exception:
-                pass
-            response = f"✅ Cetak {qty} label untuk {barang.nama} (ID:{barang_id}) masuk antrian. Printer akan mencetak otomatis."
         except ValueError:
-            response = "ID atau Qty tidak valid."
-        except Exception as e:
-            response = f"❌ Gagal: {e}"
+            raise HTTPException(status_code=422, detail="Invalid quantity")
+        if not 1 <= qty <= 500:
+            raise HTTPException(status_code=422, detail="Quantity must be 1-500")
+        job = PrintJob(environment_id=env_id, barang_id=barang.id, qty=qty, status="pending")
+        db.add(job)
+        db.commit()
+        _audit_mutation(request, action="CREATE", resource="print-jobs", resource_id=job.id)
+        try:
+            print_job_async(
+                nama=barang.nama,
+                harga_jual=int(barang.harga_jual or 0),
+                harga_beli=int(barang.harga_modal or 0),
+                sku=barang.sku or "",
+                stok=0,
+                satuan=barang.satuan or "pcs",
+                qty=qty,
+            )
+        except Exception:
+            pass
+        return {"response": f"✅ Cetak {qty} label untuk {barang.nama} (ID:{barang.id}) masuk antrian. Printer akan mencetak otomatis."}
 
-    # =============== SETELAN LABEL ===============
-    elif action == "setelan label":
-        from app.routers.label import load_label_config, save_label_config, LABEL_SIZES
+    if action == "setelan label":
+        from app.routers.label import LABEL_SIZES, load_label_config, save_label_config
 
-        if "ukuran" in params:
-            new_size = params["ukuran"]
-            size_ids = [s['id'] for s in LABEL_SIZES]
-            if new_size not in size_ids:
-                return {"response": f"Ukuran tidak valid. Pilihan: {', '.join(size_ids)}"}
+        config = load_label_config(db, env_id)
+        if "ukuran" not in params:
+            current = config.get("default_size", "a4_2col")
+            return {"response": f"Ukuran label default saat ini: {current}. Untuk mengubah, gunakan: setelan label ukuran=80x40"}
+        size = params["ukuran"]
+        valid = [item["id"] for item in LABEL_SIZES]
+        if size not in valid:
+            return {"response": f"Ukuran tidak valid. Pilihan: {', '.join(valid)}"}
+        if config.get("default_size") != size:
+            config["default_size"] = size
+            save_label_config(db, env_id, config)
+            _audit_mutation(request, action="UPDATE", resource="label", resource_id="config")
+        return {"response": f"✅ Ukuran label default diubah menjadi: {size}"}
 
-            config = load_label_config()
-            if config.get('default_size') != new_size:
-                config['default_size'] = new_size
-                save_label_config(config)
-                _audit_mutation(
-                    request,
-                    action="UPDATE",
-                    resource="label",
-                    resource_id="config",
-                )
-            response = f"✅ Ukuran label default diubah menjadi: {new_size}"
-        else:
-            config = load_label_config()
-            current_size = config.get('default_size', 'a4_2col')
-            response = f"Ukuran label default saat ini: {current_size}. Untuk mengubah, gunakan: setelan label ukuran=80x40"
+    if action == "stok masuk":
+        barang = _barang(db, _parse_id(params), env_id)
+        try:
+            quantity = int(params["jumlah"])
+            price = int(params.get("harga", 0))
+        except (KeyError, ValueError):
+            raise HTTPException(status_code=422, detail="Valid quantity required")
+        stock = db.query(StokSaatIni).filter(
+            StokSaatIni.barang_id == barang.id,
+            StokSaatIni.environment_id == env_id,
+        ).first()
+        if not stock:
+            stock = StokSaatIni(environment_id=env_id, barang_id=barang.id, jumlah=0)
+            db.add(stock)
+        stock.jumlah = (stock.jumlah or 0) + quantity
+        transaction = TransaksiStok(
+            environment_id=env_id,
+            barang_id=barang.id,
+            jenis="masuk",
+            jumlah=quantity,
+            harga_satuan=price or None,
+            total_harga=price * quantity or None,
+            keterangan=params.get("keterangan") or None,
+            user_id=principal.id,
+        )
+        db.add(transaction)
+        db.commit()
+        _audit_mutation(request, action="CREATE", resource="stok", resource_id=transaction.id)
+        return {"response": f"✅ Stok {barang.nama} bertambah {quantity}. Stok sekarang: {stock.jumlah}"}
 
-    # =============== STOK MASUK + CETAK OTOMATIS ===============
-    elif action == "stok masuk":
-        if "id" not in params or "jumlah" not in params:
-            response = "Gunakan: stok masuk id=2 jumlah=20 [harga=50000 keterangan=restock ukuran=80x40]"
-        else:
-            try:
-                barang_id = int(params["id"])
-                jumlah = int(params["jumlah"])
-                harga = int(params.get("harga", 0))
-                keterangan = params.get("keterangan", "")
-
-                db_barang = db.query(Barang).filter(Barang.id == barang_id).first()
-                if not db_barang:
-                    response = f"Barang ID {barang_id} tidak ditemukan."
-                else:
-                    # Update/set stok
-                    stok = db.query(StokSaatIni).filter(StokSaatIni.barang_id == barang_id).first()
-                    if not stok:
-                        stok = StokSaatIni(barang_id=barang_id, jumlah=0)
-                        db.add(stok)
-                    stok.jumlah = (stok.jumlah or 0) + jumlah
-
-                    # Record transaksi
-                    total = harga * jumlah if harga else 0
-                    ts = TransaksiStok(
-                        barang_id=barang_id, jenis="masuk", jumlah=jumlah,
-                        harga_satuan=harga or None, total_harga=total or None,
-                        keterangan=keterangan or None,
-                    )
-                    db.add(ts)
-                    db.commit()
-                    _audit_mutation(
-                        request,
-                        action="CREATE",
-                        resource="stok",
-                        resource_id=ts.id,
-                    )
-
-                    from app.routers.label import load_label_config
-                    config = load_label_config()
-                    # Use size from params, or fallback to default config
-                    label_size = params.get('ukuran') or config.get('default_size', 'a4_2col')  # noqa: F841 (used by future direct-print link)
-
-                    response = (
-                        f"✅ Stok {db_barang.nama} bertambah {jumlah}. "
-                        f"Stok sekarang: {stok.jumlah}"
-                    )
-                    if params.get("cetak") == "1":
-                        from app.models.printjob import PrintJob
-                        job = PrintJob(barang_id=barang_id, qty=jumlah, status="pending")
-                        db.add(job)
-                        db.commit()
-                        try:
-                            print_job_async(
-                                nama=db_barang.nama,
-                                harga_jual=int(db_barang.harga_jual or 0),
-                                harga_beli=int(db_barang.harga_modal or 0),
-                                sku=db_barang.sku or "",
-                                stok=0,
-                                satuan=db_barang.satuan or "pcs",
-                                qty=jumlah,
-                            )
-                        except Exception:
-                            pass
-                        response += " Label akan dicetak otomatis."
-            except Exception as e:
-                db.rollback()
-                response = f"❌ Gagal: {e}"
-
-    return {"response": response}
+    return {"response": "Perintah tidak dikenali."}

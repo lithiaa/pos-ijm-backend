@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 
 TEST_INTEGRATION_KEY = "test-integration-key"
@@ -13,6 +15,7 @@ _test_database_path = Path(_test_database_dir) / "test.db"
 
 # These must be set before importing the application because its engine and
 # configuration values are created at import time.
+os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = f"sqlite:///{_test_database_path}"
 os.environ["POS_INTEGRATION_KEY"] = TEST_INTEGRATION_KEY
 
@@ -22,6 +25,27 @@ from main import app  # noqa: E402
 
 
 LEGACY_ENVIRONMENT_SLUG = "lithia-autoparts"
+SCOPED_DOMAIN_MODELS = {
+    "Barang", "Supplier", "StokSaatIni", "TransaksiStok", "BarangSupplier",
+    "BarangFoto", "PrintJob", "IntegrationStockOperation",
+}
+
+
+@event.listens_for(Session, "before_flush")
+def assign_test_environment_ids(session, _flush_context, _instances):
+    """Test-only compatibility for legacy fixtures; production models remain NOT NULL."""
+    if os.environ.get("APP_ENV") == "production":
+        return
+    pending = [
+        item for item in session.new
+        if item.__class__.__name__ in SCOPED_DOMAIN_MODELS
+        and getattr(item, "environment_id", None) is None
+    ]
+    if not pending:
+        return
+    environment = get_legacy_environment(session)
+    for item in pending:
+        item.environment_id = environment.id
 
 
 def get_legacy_environment(session):
@@ -75,7 +99,6 @@ def clean_database():
 
 @pytest.fixture
 def client(monkeypatch, request):
-    monkeypatch.setattr("main.hash_password", lambda _password: "test-only-hash")
     if request.module.__name__ not in {"test_security_findings", "test_multi_toko_isolation"}:
         session = SessionLocal()
         try:

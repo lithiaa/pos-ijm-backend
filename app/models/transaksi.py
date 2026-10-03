@@ -6,7 +6,7 @@ from app.database import Base
 class StokSaatIni(Base):
     __tablename__ = "stok_saat_ini"
 
-    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)
+    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=False, index=True)
     barang_id = Column(Integer, ForeignKey("barang.id"), primary_key=True)
     jumlah = Column(Integer, default=0)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -18,7 +18,7 @@ class TransaksiStok(Base):
     __tablename__ = "transaksi_stok"
 
     id = Column(Integer, primary_key=True, index=True)
-    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)
+    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=False, index=True)
     barang_id = Column(Integer, ForeignKey("barang.id"))
     supplier_id = Column(Integer, ForeignKey("supplier.id"), nullable=True, index=True)
     jenis = Column(String(10))  # "masuk" / "keluar"
@@ -38,7 +38,7 @@ class IntegrationStockOperation(Base):
     __tablename__ = "integration_stock_operations"
     __table_args__ = (UniqueConstraint("environment_id", "operation_id", name="uq_iso_env_opid"),)
 
-    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=True, index=True)
+    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=False, index=True)
     operation_id = Column(String(36), primary_key=True)
     barang_id = Column(
         Integer,

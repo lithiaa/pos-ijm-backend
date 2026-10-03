@@ -168,23 +168,50 @@ def get_environment(
 def update_environment(
     environment_id: int,
     payload: EnvironmentUpdate,
+    request: Request,
+    support_grant_id: int | None = Header(None, alias="X-Support-Grant"),
     db: Session = Depends(get_db),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
+    fields = payload.model_fields_set
+    lifecycle_fields = {"status"}
+    settings_fields = fields - lifecycle_fields
     if principal.is_platform_owner:
         environment = db.get(Environment, environment_id)
+        if settings_fields:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            grant = db.query(SupportGrant).filter(
+                SupportGrant.id == support_grant_id,
+                SupportGrant.environment_id == environment_id,
+                SupportGrant.platform_owner_id == principal.id,
+                SupportGrant.revoked_at.is_(None),
+                SupportGrant.starts_at <= now,
+                SupportGrant.expires_at > now,
+            ).first()
+            if not grant:
+                raise HTTPException(status_code=403, detail="Active support grant required")
+            request.state.audit_environment_id = environment_id
+            request.state.audit_override = {
+                "action": "SUPPORT",
+                "resource": "environment-settings",
+                "resource_id": str(environment_id),
+                "summary": {"support_grant_id": grant.id, "fields": sorted(settings_fields)},
+            }
     else:
+        if lifecycle_fields & fields:
+            raise HTTPException(status_code=403, detail="Platform Owner required")
         environment = db.query(Environment).filter(
             Environment.id == environment_id,
             Environment.id == principal.user.environment_id,
         ).first()
-        if principal.role != "admin":
+        if principal.role != "admin" or not principal.has_permission("environment.settings"):
             raise HTTPException(status_code=403, detail="Environment Administrator required")
     if not environment:
         raise HTTPException(status_code=404, detail="Environment not found")
-    for field in payload.model_fields_set:
+    for field in fields:
         setattr(environment, field, getattr(payload, field))
-    db.commit(); db.refresh(environment)
+    db.commit()
+    db.refresh(environment)
     return {"id": environment.id, "slug": environment.slug, "name": environment.name, "status": environment.status}
 
 

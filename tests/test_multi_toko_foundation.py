@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from jose import jwt
-from sqlalchemy import text
+from sqlalchemy import CheckConstraint, text
 
 from app.models.barang import Barang
 from app.models.user import User
@@ -56,6 +56,15 @@ def test_environment_model_creation_and_user_relationship(db):
     assert user.email == "admin@berkah.com"
     assert user.status == "active"
     assert user.must_change_password is False
+
+
+def test_user_environment_nullability_is_limited_to_platform_owner_by_db_check():
+    checks = {
+        constraint.sqltext.text
+        for constraint in User.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert "role = 'platform_owner' OR environment_id IS NOT NULL" in checks
 
 
 def test_permissions_normalizer():

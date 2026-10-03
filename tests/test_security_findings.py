@@ -68,8 +68,8 @@ class TestSecurityFindings:
         db.refresh(user_a)
         db.refresh(user_b)
         
-        # Create barang - one with NULL env, one in env_a
-        db.add_all([Barang(sku="NULL-ENV", nama="Null Env Item", environment_id=None), 
+        # Cross-Toko data must never enter env_a's list.
+        db.add_all([Barang(sku="OTHER-ENV", nama="Other Env Item", environment_id=env_b.id),
                     Barang(sku="SKU-A", nama="Item A", environment_id=env_a.id)])
         db.commit()
         
@@ -78,7 +78,7 @@ class TestSecurityFindings:
         assert resp.status_code == 200
         data = resp.json()["data"]
         skus = [d["sku"] for d in data]
-        assert "NULL-ENV" not in skus, "User should not see NULL env data"
+        assert "OTHER-ENV" not in skus, "User should not see another Toko's data"
         assert "SKU-A" in skus
 
     def test_supplier_list_no_null_env_filter(self, client, db):
@@ -97,8 +97,7 @@ class TestSecurityFindings:
         db.refresh(user_a)
         db.refresh(user_b)
         
-        # Create suppliers - one with NULL env, one in env_a
-        db.add_all([Supplier(kode_supplier="NULL-ENV", nama="Null Env Supplier", environment_id=None), 
+        db.add_all([Supplier(kode_supplier="OTHER-ENV", nama="Other Env Supplier", environment_id=env_b.id),
                     Supplier(kode_supplier="SUP-A", nama="Supplier A", environment_id=env_a.id)])
         db.commit()
         
@@ -107,7 +106,7 @@ class TestSecurityFindings:
         assert resp.status_code == 200
         data = resp.json()
         codes = [d["kode_supplier"] for d in data]
-        assert "NULL-ENV" not in codes, "User should not see NULL env supplier"
+        assert "OTHER-ENV" not in codes, "User should not see another Toko's supplier"
 
     def test_stok_lookup_no_null_env_barang(self, client, db):
         """CRITICAL: stok_masuk/stok_keluar must NOT allow NULL environment_id barang"""
@@ -125,19 +124,16 @@ class TestSecurityFindings:
         db.refresh(user_a)
         db.refresh(user_b)
         
-        # Create barang with NULL env and one in env_a
-        db.add_all([Barang(sku="NULL-ENV", nama="Null Env Item", environment_id=None), 
+        # Cross-Toko barang must reject stock mutation.
+        db.add_all([Barang(sku="OTHER-ENV", nama="Other Env Item", environment_id=env_b.id),
                     Barang(sku="SKU-A", nama="Item A", environment_id=env_a.id)])
         db.commit()
         
-        # Get the NULL env barang ID
-        null_barang = db.query(Barang).filter(Barang.sku == "NULL-ENV").first()
-        
-        # User A should NOT be able to do stok_masuk on NULL env barang
+        foreign_barang = db.query(Barang).filter(Barang.sku == "OTHER-ENV").first()
         resp = client.post("/api/stok/masuk", headers=_auth(user_a), json={
-            "barang_id": null_barang.id, "jumlah": 10, "harga_satuan": 1000
+            "barang_id": foreign_barang.id, "jumlah": 10, "harga_satuan": 1000
         })
-        assert resp.status_code == 404, "Should not allow stok_masuk on NULL env barang"
+        assert resp.status_code == 404, "Should not allow stock mutation in another Toko"
 
     def test_printjob_cross_validates_barang_env(self, client, db):
         """CRITICAL: printjob list must cross-validate Barang.environment_id matches print job's"""
@@ -332,9 +328,7 @@ class TestSecurityFindings:
         db.add_all([env_a, env_b])
         db.flush()
         
-        # Create barang with NULL env (unbackfilled legacy data)
-        db.add_all([Barang(sku="NULL-ENV", nama="Null Env Item", harga_jual=100, environment_id=None), 
-                    Barang(sku="SKU-A", nama="Lithia Item", harga_jual=200, environment_id=env_a.id),
+        db.add_all([Barang(sku="SKU-A", nama="Lithia Item", harga_jual=200, environment_id=env_a.id),
                     Barang(sku="SKU-B", nama="Toko B Item", harga_jual=300, environment_id=env_b.id)])
         db.commit()
         
@@ -343,7 +337,7 @@ class TestSecurityFindings:
         assert resp.status_code == 200
         data = resp.json()["data"]
         skus = [d["sku"] for d in data]
-        assert "NULL-ENV" not in skus, "Catalog should not show NULL env items"
+        assert "SKU-B" not in skus, "Catalog should not show other Toko items"
         assert "SKU-B" not in skus, "Catalog should not show other toko items"
         assert "SKU-A" in skus, "Catalog should show Lithia Autoparts items"
 

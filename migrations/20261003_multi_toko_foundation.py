@@ -49,6 +49,7 @@ def _migrate_connection(c) -> dict:
                 "slug VARCHAR(100) NOT NULL UNIQUE, "
                 "name VARCHAR(255) NOT NULL, "
                 "status VARCHAR(20) NOT NULL DEFAULT 'active', "
+                "label_config VARCHAR(1000) NOT NULL DEFAULT '{\"default_size\":\"a4_2col\"}', "
                 "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
                 "PRIMARY KEY (id)"
@@ -56,6 +57,14 @@ def _migrate_connection(c) -> dict:
             )
         )
         environments_created = True
+
+    if not _column_exists(c, schema, "environments", "label_config"):
+        c.execute(
+            text(
+                "ALTER TABLE environments ADD COLUMN label_config VARCHAR(1000) NOT NULL "
+                "DEFAULT '{\"default_size\":\"a4_2col\"}'"
+            )
+        )
 
     user_column_definitions = [
         (
@@ -92,6 +101,29 @@ def _migrate_connection(c) -> dict:
             "WHERE environment_id IS NULL AND LOWER(role) != 'platform_owner'"
         )
     )
+    invalid_users = c.execute(
+        text(
+            "SELECT COUNT(*) FROM users "
+            "WHERE environment_id IS NULL AND LOWER(role) != 'platform_owner'"
+        )
+    ).scalar()
+    if invalid_users:
+        raise RuntimeError("Preflight failed: non-platform users still have NULL environment_id")
+    constraint = c.execute(
+        text(
+            "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+            "WHERE TABLE_SCHEMA=:s AND TABLE_NAME='users' "
+            "AND CONSTRAINT_NAME='ck_users_environment_or_platform_owner'"
+        ),
+        {"s": schema},
+    ).scalar()
+    if not constraint:
+        c.execute(
+            text(
+                "ALTER TABLE users ADD CONSTRAINT ck_users_environment_or_platform_owner "
+                "CHECK (role = 'platform_owner' OR environment_id IS NOT NULL)"
+            )
+        )
 
     return {
         "environments_created": environments_created,

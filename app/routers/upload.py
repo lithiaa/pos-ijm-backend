@@ -29,7 +29,7 @@ def _valid_image(content_type: str, data: bytes) -> bool:
     return content_type == "image/webp" and data.startswith(b"RIFF") and data[8:12] == b"WEBP"
 
 
-async def _save(file: UploadFile, storage_dir: str = STORAGE_DIR) -> str:
+async def _save(file: UploadFile, env_id: int, storage_dir: str = STORAGE_DIR) -> str:
     data = await file.read(MAX_PHOTO_BYTES + 1)
     if file.content_type not in EXTENSIONS or not data:
         raise HTTPException(status_code=422, detail="Foto harus JPEG, PNG, atau WebP valid maksimal 5MB")
@@ -38,10 +38,15 @@ async def _save(file: UploadFile, storage_dir: str = STORAGE_DIR) -> str:
     if not _valid_image(file.content_type, data):
         raise HTTPException(status_code=422, detail="Foto harus JPEG, PNG, atau WebP valid maksimal 5MB")
     filename = f"{uuid.uuid4()}{EXTENSIONS[file.content_type]}"
-    os.makedirs(storage_dir, exist_ok=True)
-    with open(os.path.join(storage_dir, filename), "wb") as output:
+    directory = os.path.join(storage_dir, str(env_id))
+    os.makedirs(directory, exist_ok=True)
+    with open(os.path.join(directory, filename), "wb") as output:
         output.write(data)
     return filename
+
+
+def _photo_path(storage_dir: str, env_id: int, filename: str) -> str:
+    return os.path.join(storage_dir, str(env_id), os.path.basename(filename))
 
 
 def _out(photo: BarangFoto, primary: bool) -> dict:
@@ -50,17 +55,18 @@ def _out(photo: BarangFoto, primary: bool) -> dict:
             "is_primary": primary, "created_at": str(photo.created_at)[:19] if photo.created_at else None}
 
 
-def _locked_barang(db: Session, barang_id: int) -> Barang | None:
-    barang = db.execute(select(Barang).where(Barang.id == barang_id).with_for_update()).scalar_one_or_none()
+def _locked_barang(db: Session, barang_id: int, env_id: int) -> Barang | None:
+    where = (Barang.id == barang_id) & (Barang.environment_id == env_id)
+    barang = db.execute(select(Barang).where(where).with_for_update()).scalar_one_or_none()
     if barang and db.bind.dialect.name == "sqlite":
-        db.execute(update(Barang).where(Barang.id == barang_id).values(id=Barang.id))
+        db.execute(update(Barang).where(where).values(id=Barang.id))
     return barang
 
 
-def remove_unreferenced_file(db: Session, filename: str, storage_dir: str = STORAGE_DIR) -> None:
-    if db.query(BarangFoto.id).filter_by(filename=filename).first() or db.query(Barang.id).filter_by(foto=filename).first():
+def remove_unreferenced_file(db: Session, filename: str, env_id: int, storage_dir: str = STORAGE_DIR) -> None:
+    if db.query(BarangFoto.id).filter_by(environment_id=env_id, filename=filename).first() or db.query(Barang.id).filter_by(environment_id=env_id, foto=filename).first():
         return
-    try: os.remove(os.path.join(storage_dir, os.path.basename(filename)))
+    try: os.remove(_photo_path(storage_dir, env_id, filename))
     except OSError: pass
 
 
@@ -73,8 +79,8 @@ def _reorder(db: Session, photos: list[BarangFoto]) -> None:
         photo.urutan = index
 
 
-def add_photo(db: Session, barang_id: int, filename: str, primary: bool = False) -> BarangFoto:
-    barang = _locked_barang(db, barang_id)
+def add_photo(db: Session, barang_id: int, filename: str, env_id: int, primary: bool = False) -> BarangFoto:
+    barang = _locked_barang(db, barang_id, env_id)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
     photos = db.query(BarangFoto).filter_by(barang_id=barang_id).order_by(BarangFoto.urutan, BarangFoto.id).all()
@@ -100,13 +106,13 @@ def list_photos(barang_id: int, db: Session = Depends(get_db), user=Depends(get_
 @router.post("/api/barang/{barang_id}/photos")
 async def append_photo(barang_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     if not db.query(Barang.id).filter(Barang.id == barang_id, _env_filter(Barang.environment_id, env_id, user)).first(): raise HTTPException(status_code=404, detail="Barang not found")
-    filename = await _save(file)
+    filename = await _save(file, env_id)
     try:
-        photo = add_photo(db, barang_id, filename)
+        photo = add_photo(db, barang_id, filename, env_id)
         db.commit(); db.refresh(photo)
     except Exception:
         db.rollback()
-        try: os.remove(os.path.join(STORAGE_DIR, filename))
+        try: os.remove(_photo_path(STORAGE_DIR, env_id, filename))
         except OSError: pass
         raise
     return _out(photo, photo.urutan == 0)
@@ -131,7 +137,7 @@ def delete_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), u
     barang = db.get(Barang, barang_id)
     barang.foto = photos[0].filename if photos else None
     db.commit()
-    remove_unreferenced_file(db, filename, STORAGE_DIR)
+    remove_unreferenced_file(db, filename, env_id, STORAGE_DIR)
     return {"ok": True}
 
 
@@ -151,13 +157,13 @@ def primary_photo(barang_id: int, photo_id: int, db: Session = Depends(get_db), 
 async def upload_foto_barang(barang_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     """Legacy endpoint appends then makes upload primary."""
     if not db.query(Barang.id).filter(Barang.id == barang_id, _env_filter(Barang.environment_id, env_id, user)).first(): raise HTTPException(status_code=404, detail="Barang not found")
-    filename = await _save(file)
+    filename = await _save(file, env_id)
     try:
-        photo = add_photo(db, barang_id, filename, primary=True)
+        photo = add_photo(db, barang_id, filename, env_id, primary=True)
         db.commit(); db.refresh(photo)
     except Exception:
         db.rollback()
-        try: os.remove(os.path.join(STORAGE_DIR, filename))
+        try: os.remove(_photo_path(STORAGE_DIR, env_id, filename))
         except OSError: pass
         raise
     return {"foto_url": _out(photo, True)["foto_url"]}

@@ -131,7 +131,7 @@ def test_product_delete_locks_product_before_gallery_snapshot(client, db, monkey
     product = auth_client(client, db).post("/api/barang", json={"sku": "LOCKDELETE", "nama": "Lock delete"}).json()
     locked = []
     original = barang._locked_barang
-    monkeypatch.setattr(barang, "_locked_barang", lambda session, product_id: locked.append(product_id) or original(session, product_id))
+    monkeypatch.setattr(barang, "_locked_barang", lambda session, product_id, env_id: locked.append(product_id) or original(session, product_id, env_id))
     assert client.delete(f"/api/barang/{product['id']}").status_code == 200
     assert locked == [product["id"]]
 
@@ -146,7 +146,8 @@ def test_supplier_secondary_link_delete_is_controlled_and_product_delete_cleans_
     photos = [api.post(f"/api/barang/{product['id']}/photos", files={"file": (f"{n}.png", PNG, "image/png")}).json() for n in ("one", "two")]
     assert api.delete(f"/api/supplier/{supplier['id']}").status_code in (400, 409)
     assert api.delete(f"/api/barang/{product['id']}").status_code == 200
-    assert all(not (tmp_path / photo["filename"]).exists() for photo in photos)
+    environment_id = get_legacy_environment(db).id
+    assert all(not (tmp_path / str(environment_id) / photo["filename"]).exists() for photo in photos)
 
 
 def test_gallery_allows_shared_legacy_filename_for_each_product(client, db):

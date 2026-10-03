@@ -160,6 +160,7 @@ def test_chatbot_create_barang_assigns_code_to_new_supplier_without_output_chang
 ):
     response = client.post(
         "/api/chatbot/",
+        headers=bearer_headers(db),
         json={"command": "tambah barang nama=Chat Part supplier=Chat Vendor"},
     )
 
@@ -172,12 +173,13 @@ def test_chatbot_create_barang_assigns_code_to_new_supplier_without_output_chang
 def test_chatbot_update_barang_assigns_code_to_new_supplier_without_output_change(
     client, db
 ):
-    barang = Barang(sku="CHAT-UPDATE", nama="Before", harga_jual=0)
+    barang = Barang(environment_id=get_legacy_environment(db).id, sku="CHAT-UPDATE", nama="Before", harga_jual=0)
     db.add(barang)
     db.commit()
 
     response = client.post(
         "/api/chatbot/",
+        headers=bearer_headers(db),
         json={
             "command": f"ubah barang id={barang.id} supplier=Update Chat Vendor"
         },
@@ -376,7 +378,7 @@ def test_barang_list_serializes_supplier_code_name_and_old_fields(
         "satuan": "box",
         "deskripsi": "Kept",
         "foto": "route.jpg",
-        "foto_url": "/storage/foto-barang/route.jpg",
+        "foto_url": f"/api/foto-barang/{get_legacy_environment(db).id}/route.jpg",
         "photos": [],
         "shopee_url": None,
         "stok": 0,

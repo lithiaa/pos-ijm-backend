@@ -51,7 +51,7 @@ def test_catalog_is_anonymous_and_returns_only_safe_fields(client, db):
                 "harga_jual": 125_000,
                 "satuan": "pcs",
                 "deskripsi": "Public description",
-                "foto_url": "/storage/foto-barang/brake.webp",
+                "foto_url": "/api/katalog/foto/brake.webp",
                 "shopee_url": "https://shopee.co.id/brake-pad-pro",
             }
         ],

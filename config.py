@@ -1,14 +1,16 @@
 import os
+from secrets import token_urlsafe
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Database
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "mysql+pymysql://root@localhost:3306/toko_sparepart"
+    "mysql+pymysql://root@localhost:3306/toko_sparepart",
 )
-SECRET_KEY = os.getenv("SECRET_KEY", "ganti-secret-key-ini")
+SECRET_KEY = os.getenv("SECRET_KEY") or (token_urlsafe(48) if APP_ENV in {"development", "test"} else "")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 POS_INTEGRATION_KEY = os.getenv("POS_INTEGRATION_KEY", "")
@@ -17,12 +19,40 @@ INVITE_SMTP_HOST = os.getenv("INVITE_SMTP_HOST", "")
 INVITE_SMTP_PORT = int(os.getenv("INVITE_SMTP_PORT", "25"))
 INVITE_FROM_EMAIL = os.getenv("INVITE_FROM_EMAIL", "")
 
-# Admin default
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
-ADMIN_NAMA = os.getenv("ADMIN_NAMA", "Admin Toko")
 
-# SANGUOERIP mapping
+def _validate_production_config() -> None:
+    if APP_ENV != "production":
+        return
+    predictable = {
+        "",
+        "admin",
+        "admin123",
+        "change-me",
+        "changeme",
+        "default",
+        "ganti-secret-key-ini",
+        "secret",
+        "test",
+        "test-integration-key",
+    }
+    invalid = []
+    if SECRET_KEY.lower() in predictable or len(SECRET_KEY) < 32:
+        invalid.append("SECRET_KEY")
+    if POS_INTEGRATION_KEY and (
+        POS_INTEGRATION_KEY.lower() in predictable or len(POS_INTEGRATION_KEY) < 32
+    ):
+        invalid.append("POS_INTEGRATION_KEY")
+    for name in ("ADMIN_USERNAME", "ADMIN_PASSWORD"):
+        if os.getenv(name):
+            invalid.append(name)
+    if invalid:
+        raise RuntimeError(
+            "Production config has missing or predictable values: " + ", ".join(invalid)
+        )
+
+
+_validate_production_config()
+
 HARGA_ENCODE_MAP = {
     "S": "1", "A": "2", "N": "3", "G": "4",
     "U": "5", "O": "6", "E": "7", "R": "8",

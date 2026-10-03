@@ -41,6 +41,9 @@ def _migrate_connection(c):
             c.execute(text(f"ALTER TABLE `{table}` ADD COLUMN environment_id INT NULL"))
             added.append(table)
         c.execute(text(f"UPDATE `{table}` SET environment_id=:e WHERE environment_id IS NULL"), {"e": env})
+        missing = c.execute(text(f"SELECT COUNT(*) FROM `{table}` WHERE environment_id IS NULL")).scalar()
+        if missing:
+            raise RuntimeError(f"Preflight failed: {table} still has NULL environment_id rows")
         index = f"ix_{table}_environment_id"
         if not _index_exists(c, schema, table, index):
             c.execute(text(f"ALTER TABLE `{table}` ADD INDEX `{index}` (environment_id)"))
@@ -52,6 +55,8 @@ def _migrate_connection(c):
             if dup_check:
                 raise RuntimeError(f"Cannot create unique index {name} on {table}: duplicates exist")
             c.execute(text(f"ALTER TABLE `{table}` ADD UNIQUE INDEX `{name}` ({columns})"))
+    for table in TABLES:
+        c.execute(text(f"ALTER TABLE `{table}` MODIFY COLUMN environment_id INT NOT NULL"))
     return {"columns_added": added, "environment_id": env}
 
 

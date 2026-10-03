@@ -37,7 +37,7 @@ def _to_out(barang: Barang) -> KatalogBarangOut:
     foto = os.path.basename(barang.foto) if barang.foto else None
     return KatalogBarangOut(id=barang.id, slug=_slug(barang), sku=barang.sku, nama=barang.nama,
         merek=barang.merek, harga_jual=int(barang.harga_jual or 0), satuan=barang.satuan or "pcs",
-        deskripsi=barang.deskripsi, foto_url=f"/storage/foto-barang/{foto}" if foto else None,
+        deskripsi=barang.deskripsi, foto_url=f"/api/katalog/foto/{foto}" if foto else None,
         shopee_url=barang.shopee_url)
 
 

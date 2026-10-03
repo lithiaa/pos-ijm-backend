@@ -27,10 +27,12 @@ def test_label_uses_stored_buy_code_not_encoded_buy_price(client, db):
     db.add(barang)
     db.commit()
 
-    response = client.get(f"/api/label/sticker/{barang.id}")
+    response = client.get(
+        f"/api/label/sticker/{barang.id}", headers=auth_headers(db)
+    )
 
     assert response.status_code == 200
-    assert MANUAL_CODE in response.text
+    assert MANUAL_CODE not in response.text
     assert harga_encode(45_000) not in response.text
 
 

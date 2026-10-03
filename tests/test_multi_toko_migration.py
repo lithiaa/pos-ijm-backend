@@ -57,10 +57,17 @@ class FakeMySQLConnection:
                 return Result(1 if (t, c) in self.columns else 0)
             return Result(1 if t in self.tables else 0)
 
+        if "information_schema.TABLE_CONSTRAINTS" in sql:
+            return Result(1 if "ck_users_environment_or_platform_owner" in self.tables else 0)
+
         if "CREATE TABLE `environments`" in sql or "CREATE TABLE environments" in sql:
             self.tables.add("environments")
             for col in ("id", "slug", "name", "status", "created_at", "updated_at"):
                 self.columns.add(("environments", col))
+            return Result()
+
+        if "ALTER TABLE environments ADD COLUMN label_config" in sql:
+            self.columns.add(("environments", "label_config"))
             return Result()
 
         if "ALTER TABLE `users` ADD COLUMN" in sql or "ALTER TABLE users ADD COLUMN" in sql:
@@ -69,8 +76,15 @@ class FakeMySQLConnection:
                     self.columns.add(("users", col))
             return Result()
 
+        if "ADD CONSTRAINT ck_users_environment_or_platform_owner" in sql:
+            self.tables.add("ck_users_environment_or_platform_owner")
+            return Result()
+
         if "INSERT" in sql:
             return Result(1)
+
+        if "SELECT COUNT(*) FROM users" in sql:
+            return Result(0)
 
         if "UPDATE" in sql:
             return Result(1)
@@ -109,6 +123,7 @@ def test_migration_creates_environments_and_adds_user_columns_idempotently():
     assert "slug" in sqls and "status" in sqls
     assert "lithia-autoparts" in sqls
     assert "LOWER(role) != 'platform_owner'" in sqls
+    assert "label_config" in sqls
 
     # Second run should be fully idempotent
     statements_before = len(conn.statements)
@@ -120,6 +135,23 @@ def test_migration_creates_environments_and_adds_user_columns_idempotently():
     new_sqls = [s[0] for s in conn.statements[statements_before:]]
     assert not any("CREATE TABLE" in s for s in new_sqls)
     assert not any("ALTER TABLE" in s for s in new_sqls)
+
+
+def test_migration_adds_label_config_to_existing_environments():
+    migration = load_migration()
+    conn = FakeMySQLConnection()
+    conn.tables.update({"users", "environments"})
+    for column in ("id", "username", "password_hash", "nama", "role", "created_at"):
+        conn.columns.add(("users", column))
+    for column in ("id", "slug", "name", "status", "created_at", "updated_at"):
+        conn.columns.add(("environments", column))
+
+    migration._migrate_connection(conn)
+
+    assert any(
+        "ALTER TABLE environments ADD COLUMN label_config" in statement
+        for statement, _ in conn.statements
+    )
 
 
 def test_migration_safe_bootstrap_strategy_no_hardcoded_credentials():

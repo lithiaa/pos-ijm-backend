@@ -59,7 +59,7 @@ def _barang_to_out(b: Barang) -> BarangOut:
         ) for link in supplier_links
     ]
     photos = [BarangPhotoOut(id=p.id, filename=p.filename, foto=p.filename,
-        foto_url=f"/storage/foto-barang/{p.filename}", urutan=p.urutan,
+        foto_url=f"/api/foto-barang/{b.environment_id}/{p.filename}", urutan=p.urutan,
         is_primary=i == 0, created_at=str(p.created_at)[:19] if p.created_at else None)
         for i, p in enumerate(b.photos)]
     primary_photo = photos[0] if photos else None
@@ -82,7 +82,7 @@ def _barang_to_out(b: Barang) -> BarangOut:
         satuan=b.satuan,
         deskripsi=b.deskripsi,
         foto=primary_photo.filename if primary_photo else b.foto,
-        foto_url=primary_photo.foto_url if primary_photo else (f"/storage/foto-barang/{b.foto}" if b.foto else None),
+        foto_url=primary_photo.foto_url if primary_photo else (f"/api/foto-barang/{b.environment_id}/{b.foto}" if b.foto else None),
         photos=photos,
         shopee_url=b.shopee_url,
         stok=stok,
@@ -209,14 +209,14 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
     db.add(b)
     db.flush()
 
-    stok = StokSaatIni(barang_id=b.id, jumlah=0)
+    stok = StokSaatIni(environment_id=env_id, barang_id=b.id, jumlah=0)
     db.add(stok)
     db.flush()
     if req.stok_awal > 0:
         record_stock_in(db, barang_id=b.id, jumlah=req.stok_awal, harga_satuan=req.harga_modal,
                         keterangan="Stok awal", user_id=user.id, supplier_id=req.supplier_id)
     elif req.supplier_id is not None:
-        db.add(BarangSupplier(barang_id=b.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
+        db.add(BarangSupplier(environment_id=env_id, barang_id=b.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
 
     db.commit()
     db.refresh(b)
@@ -244,7 +244,7 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
         b.harga_jual = harga_decode(req.harga_jual_kode)
     if "supplier_id" in req.model_fields_set and req.supplier_id is not None:
         if not db.get(BarangSupplier, (b.id, req.supplier_id)):
-            db.add(BarangSupplier(barang_id=b.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
+            db.add(BarangSupplier(environment_id=env_id, barang_id=b.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
         winner = db.query(BarangSupplier).filter(
             BarangSupplier.barang_id == b.id, BarangSupplier.jumlah_masuk_kumulatif > 0
         ).order_by(BarangSupplier.jumlah_masuk_kumulatif.desc(), BarangSupplier.supplier_id).first()
@@ -261,7 +261,7 @@ def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
     b = db.query(Barang).filter(Barang.id == barang_id, Barang.environment_id == env_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
-    b = _locked_barang(db, barang_id)
+    b = _locked_barang(db, barang_id, env_id)
     photo_filenames = {photo.filename for photo in b.photos}
     if b.foto:
         photo_filenames.add(b.foto)
@@ -283,5 +283,5 @@ def delete_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
         raise
 
     for filename in photo_filenames:
-        remove_unreferenced_file(db, filename, STORAGE_DIR)
+        remove_unreferenced_file(db, filename, env_id, STORAGE_DIR)
     return {"id": barang_id}

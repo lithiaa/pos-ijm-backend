@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
 from app.audit import AuditMiddleware
@@ -23,8 +22,6 @@ from app.routers.printjob import router as printjob_router
 from app.routers.environments import router as environments_router
 from app.routers.users import router as users_router
 from app.routers.copy_jobs import router as copy_jobs_router
-from app.auth import hash_password
-from config import ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_NAMA
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -67,8 +64,9 @@ from fastapi import Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_permission
 from app.models.barang import Barang, BarangFoto
+from app.models.environment import Environment
 from app.routers.upload import STORAGE_DIR as FOTO_STORAGE_DIR
 
 
@@ -77,7 +75,7 @@ def serve_foto_barang(
     environment_id: int,
     filename: str,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_permission("foto.read")),
     env_id: int = Depends(get_current_user_env_id),
 ):
     if env_id != environment_id:
@@ -94,32 +92,28 @@ def serve_foto_barang(
     )
     if not owned:
         raise HTTPException(status_code=404, detail="Photo not found")
-    paths = (
-        os.path.join(FOTO_STORAGE_DIR, str(environment_id), filename),
-        os.path.join(FOTO_STORAGE_DIR, filename),
-    )
-    filepath = next((path for path in paths if os.path.isfile(path)), None)
-    if filepath is None:
+    filepath = os.path.join(FOTO_STORAGE_DIR, str(environment_id), filename)
+    if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="Photo not found")
     return FileResponse(filepath)
 
 
-
-@app.on_event("startup")
-def seed_data():
-    """Buat admin default kalau belum ada"""
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        admin = db.query(User).filter(User.username == ADMIN_USERNAME).first()
-        if not admin:
-            db.add(User(
-                username=ADMIN_USERNAME,
-                password_hash=hash_password(ADMIN_PASSWORD),
-                nama=ADMIN_NAMA,
-                role="admin",
-            ))
-            db.commit()
-            print(f"Admin default created: {ADMIN_USERNAME}")
-    finally:
-        db.close()
+@app.get("/api/katalog/foto/{filename}")
+def serve_katalog_foto(filename: str, db: Session = Depends(get_db)):
+    if filename != os.path.basename(filename):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    environment = db.query(Environment).filter(Environment.slug == "lithia-autoparts").first()
+    if not environment:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    owned = (
+        db.query(BarangFoto.id)
+        .filter(BarangFoto.environment_id == environment.id, BarangFoto.filename == filename)
+        .first()
+        or db.query(Barang.id)
+        .filter(Barang.environment_id == environment.id, Barang.foto == filename)
+        .first()
+    )
+    filepath = os.path.join(FOTO_STORAGE_DIR, str(environment.id), filename)
+    if not owned or not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FileResponse(filepath)

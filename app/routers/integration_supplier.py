@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -20,11 +20,12 @@ router = APIRouter(
 
 @router.get("", response_model=IntegrationSupplierListResponse)
 def list_integration_suppliers(request: Request, db: Session = Depends(get_db)):
-    query = db.query(Supplier)
-    if (env_id := get_integration_env_id(request)) is not None:
-        query = query.filter(Supplier.environment_id == env_id)
+    env_id = get_integration_env_id(request)
+    if env_id is None:
+        raise HTTPException(status_code=401, detail="Integration environment required")
     suppliers = (
-        query
+        db.query(Supplier)
+        .filter(Supplier.environment_id == env_id)
         .order_by(
             func.lower(func.coalesce(Supplier.kode_supplier, "")),
             func.lower(Supplier.nama),

@@ -18,7 +18,7 @@ from app.models.transaksi import (
     StokSaatIni,
     TransaksiStok,
 )
-from app.routers.upload import STORAGE_DIR, _locked_barang, _save, add_photo, delete_photo as _delete_gallery_photo, remove_unreferenced_file
+from app.routers.upload import STORAGE_DIR, _locked_barang, _photo_path, _save, add_photo, delete_photo as _delete_gallery_photo, remove_unreferenced_file
 from app.schemas.integration_barang import (
     IntegrationBarangCreate,
     IntegrationBarangListResponse,
@@ -157,8 +157,10 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _validate_supplier_id(db: Session, supplier_id: int | None) -> None:
-    if supplier_id is not None and not db.get(Supplier, supplier_id):
+def _validate_supplier_id(db: Session, supplier_id: int | None, env_id: int) -> None:
+    if supplier_id is not None and not db.query(Supplier.id).filter(
+        Supplier.id == supplier_id, Supplier.environment_id == env_id
+    ).first():
         raise HTTPException(status_code=422, detail="Supplier not found")
 
 
@@ -266,13 +268,15 @@ def list_integration_barang(
 
 @router.get("/meta", response_model=IntegrationBarangMetaOut)
 def get_integration_barang_meta(request: Request, db: Session = Depends(get_db)):
-    query = db.query(Supplier)
-    if (env_id := get_integration_env_id(request)) is not None:
-        query = query.filter(Supplier.environment_id == env_id)
-    suppliers = query.order_by(func.lower(Supplier.nama), Supplier.id).all()
+    env_id = _integration_env_id(request)
+    suppliers = db.query(Supplier).filter(
+        Supplier.environment_id == env_id
+    ).order_by(func.lower(Supplier.nama), Supplier.id).all()
     values = {
         value.strip()
-        for (value,) in db.query(Barang.satuan).distinct().all()
+        for (value,) in db.query(Barang.satuan).filter(
+            Barang.environment_id == env_id
+        ).distinct().all()
         if value and value.strip()
     }
     values.add("pcs")
@@ -398,7 +402,7 @@ def create_integration_barang(
 
     if _get_by_sku_for_integration(db, req.sku, request):
         raise HTTPException(status_code=409, detail="SKU already exists")
-    _validate_supplier_id(db, req.supplier_id)
+    _validate_supplier_id(db, req.supplier_id, _integration_env_id(request))
 
     barang = Barang(
         environment_id=_integration_env_id(request),
@@ -467,7 +471,7 @@ def add_integration_stock(
     if previous_barang:
         return _to_integration_out(previous_barang)
 
-    _validate_supplier_id(db, req.supplier_id)
+    _validate_supplier_id(db, req.supplier_id, _integration_env_id(request))
     try:
         record_stock_in(
             db, barang_id=barang.id, jumlah=req.jumlah_barang_masuk,
@@ -524,13 +528,19 @@ def update_integration_barang_by_id(
     if "sku" in supplied:
         duplicate = (
             db.query(Barang)
-            .filter(Barang.sku == req.sku, Barang.id != barang.id)
+            .filter(
+                Barang.sku == req.sku,
+                Barang.id != barang.id,
+                Barang.environment_id == _integration_env_id(request),
+            )
             .first()
         )
         if duplicate:
             raise HTTPException(status_code=409, detail="SKU already exists")
     _validate_supplier_id(
-        db, req.supplier_id if "supplier_id" in supplied else barang.supplier_id
+        db,
+        req.supplier_id if "supplier_id" in supplied else barang.supplier_id,
+        _integration_env_id(request),
     )
 
     field_map = {"harga_beli": "harga_modal"}
@@ -567,20 +577,21 @@ async def upload_integration_barang_photo(
     if not _get_by_id_for_integration(db, barang_id, request):
         raise HTTPException(status_code=404, detail="Barang not found")
     barang = _get_by_id_for_integration(db, barang_id, request)
-    filename = await _save(file, STORAGE_DIR)
+    env_id = _integration_env_id(request)
+    filename = await _save(file, env_id, STORAGE_DIR)
     old_photo = barang.foto
     try:
-        add_photo(db, barang_id, filename, primary=True)
+        add_photo(db, barang_id, filename, _integration_env_id(request), primary=True)
         db.commit()
     except Exception:
         db.rollback()
         try:
-            os.remove(os.path.join(STORAGE_DIR, filename))
+            os.remove(_photo_path(STORAGE_DIR, env_id, filename))
         except OSError:
             pass
         raise
     if old_photo and old_photo != filename:
-        remove_unreferenced_file(db, old_photo, STORAGE_DIR)
+        remove_unreferenced_file(db, old_photo, env_id, STORAGE_DIR)
     return _to_integration_out(_get_by_id_for_integration(db, barang_id, request))
 
 
@@ -593,18 +604,21 @@ def delete_integration_barang_photo(
     barang = _get_by_id_for_integration(db, barang_id, request)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
+    env_id = _integration_env_id(request)
     old_photo = barang.foto
-    photo = db.query(BarangFoto).filter_by(barang_id=barang_id, filename=old_photo).first()
+    photo = db.query(BarangFoto).filter_by(
+        environment_id=env_id, barang_id=barang_id, filename=old_photo
+    ).first()
     if not photo:
         barang.foto = None
         db.commit()
         if old_photo:
             try:
-                os.remove(os.path.join(STORAGE_DIR, os.path.basename(old_photo)))
+                os.remove(_photo_path(STORAGE_DIR, env_id, old_photo))
             except OSError:
                 pass
         return
-    _delete_gallery_photo(barang_id, photo.id, db, None)
+    _delete_gallery_photo(barang_id, photo.id, db, None, env_id)
 
 
 @router.delete("/{barang_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -613,35 +627,47 @@ def delete_integration_barang(
     db: Session = Depends(get_db),
     request: Request = None,
 ):
-    barang = _locked_barang(db, barang_id)
+    env_id = _integration_env_id(request)
+    barang = _locked_barang(db, barang_id, env_id)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
-    if db.query(PrintJob.id).filter(PrintJob.barang_id == barang_id).first():
+    if db.query(PrintJob.id).filter(
+        PrintJob.barang_id == barang_id, PrintJob.environment_id == env_id
+    ).first():
         raise HTTPException(
             status_code=409,
             detail="Barang has print jobs and cannot be deleted",
         )
-    photo_filenames = {photo.filename for photo in db.query(BarangFoto).filter_by(barang_id=barang_id)}
+    photo_filenames = {
+        photo.filename for photo in db.query(BarangFoto).filter_by(
+            environment_id=env_id, barang_id=barang_id
+        )
+    }
     if barang.foto:
         photo_filenames.add(barang.foto)
 
     try:
         db.query(IntegrationStockOperation).filter(
-            IntegrationStockOperation.barang_id == barang_id
+            IntegrationStockOperation.barang_id == barang_id,
+            IntegrationStockOperation.environment_id == env_id,
         ).delete(synchronize_session=False)
         db.query(TransaksiStok).filter(
-            TransaksiStok.barang_id == barang_id
+            TransaksiStok.barang_id == barang_id,
+            TransaksiStok.environment_id == env_id,
         ).delete(synchronize_session=False)
         db.query(StokSaatIni).filter(
-            StokSaatIni.barang_id == barang_id
+            StokSaatIni.barang_id == barang_id,
+            StokSaatIni.environment_id == env_id,
         ).delete(synchronize_session=False)
-        db.query(Barang).filter(Barang.id == barang_id).delete(
+        db.query(Barang).filter(Barang.id == barang_id, Barang.environment_id == env_id).delete(
             synchronize_session=False
         )
         db.commit()
     except IntegrityError:
         db.rollback()
-        if db.query(PrintJob.id).filter(PrintJob.barang_id == barang_id).first():
+        if db.query(PrintJob.id).filter(
+            PrintJob.barang_id == barang_id, PrintJob.environment_id == env_id
+        ).first():
             raise HTTPException(
                 status_code=409,
                 detail="Barang has print jobs and cannot be deleted",
@@ -652,7 +678,7 @@ def delete_integration_barang(
         raise
 
     for filename in photo_filenames:
-        remove_unreferenced_file(db, filename, STORAGE_DIR)
+        remove_unreferenced_file(db, filename, env_id, STORAGE_DIR)
 
 
 @router.put("/by-sku/{sku}", response_model=IntegrationBarangOut)

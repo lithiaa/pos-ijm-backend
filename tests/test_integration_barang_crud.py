@@ -391,7 +391,9 @@ def test_delete_requires_auth_cleans_dependencies_file_and_preserves_unrelated(
     monkeypatch.setattr(integration_barang, "STORAGE_DIR", str(tmp_path))
     target = add_barang(db, sku="DELETE", foto="target.jpg")
     other = add_barang(db, sku="KEEP")
-    (tmp_path / "target.jpg").write_bytes(b"photo")
+    environment_id = legacy_environment_id(db)
+    (tmp_path / str(environment_id)).mkdir()
+    (tmp_path / str(environment_id) / "target.jpg").write_bytes(b"photo")
     db.add_all(
         [
             TransaksiStok(barang_id=target.id, jenis="masuk", jumlah=1),
@@ -417,7 +419,7 @@ def test_delete_requires_auth_cleans_dependencies_file_and_preserves_unrelated(
     assert db.get(Barang, other_id) is not None
     assert db.query(TransaksiStok).filter_by(barang_id=other_id).count() == 1
     assert db.query(IntegrationStockOperation).filter_by(barang_id=other_id).count() == 1
-    assert not (tmp_path / "target.jpg").exists()
+    assert not (tmp_path / str(environment_id) / "target.jpg").exists()
     assert client.delete(f"{BASE_URL}/{target_id}", headers=AUTH_HEADERS).status_code == 404
 
 
@@ -547,7 +549,9 @@ def test_delete_photo_supports_jwt_and_clears_database_and_file(
     db.add(user)
     db.commit()
     barang = add_barang(db, sku="PHOTO-JWT", foto="photo.jpg")
-    (tmp_path / "photo.jpg").write_bytes(b"photo")
+    environment_id = legacy_environment_id(db)
+    (tmp_path / str(environment_id)).mkdir()
+    (tmp_path / str(environment_id) / "photo.jpg").write_bytes(b"photo")
     headers = {
         "Authorization": f"Bearer {create_access_token({'sub': str(user.id)})}"
     }
@@ -558,7 +562,7 @@ def test_delete_photo_supports_jwt_and_clears_database_and_file(
     assert response.content == b""
     db.expire_all()
     assert db.get(Barang, barang.id).foto is None
-    assert not (tmp_path / "photo.jpg").exists()
+    assert not (tmp_path / str(environment_id) / "photo.jpg").exists()
 
 
 def test_delete_photo_supports_legacy_key_and_is_idempotent_without_photo(client, db):
@@ -700,7 +704,7 @@ def test_upload_streams_uses_safe_server_extension_and_returns_full_item(
     assert filename.endswith(expected_ext)
     assert "/" not in filename and "\\" not in filename
     assert response.json()["foto_url"] == f"/api/foto-barang/{barang.id}/{filename}"
-    assert (tmp_path / filename).read_bytes() == IMAGE_BYTES[content_type]
+    assert (tmp_path / str(legacy_environment_id(db)) / filename).read_bytes() == IMAGE_BYTES[content_type]
 
 
 def test_upload_replaces_old_photo_and_removes_new_file_on_db_failure(
@@ -710,7 +714,9 @@ def test_upload_replaces_old_photo_and_removes_new_file_on_db_failure(
 
     monkeypatch.setattr(integration_barang, "STORAGE_DIR", str(tmp_path))
     barang = add_barang(db, sku="REPLACE", foto="old.jpg")
-    (tmp_path / "old.jpg").write_bytes(b"old")
+    environment_id = legacy_environment_id(db)
+    (tmp_path / str(environment_id)).mkdir()
+    (tmp_path / str(environment_id) / "old.jpg").write_bytes(b"old")
 
     response = client.post(
         f"{BASE_URL}/{barang.id}/foto",
@@ -719,8 +725,8 @@ def test_upload_replaces_old_photo_and_removes_new_file_on_db_failure(
     )
 
     assert response.status_code == 200
-    assert not (tmp_path / "old.jpg").exists()
-    assert (tmp_path / response.json()["foto"]).exists()
+    assert not (tmp_path / str(environment_id) / "old.jpg").exists()
+    assert (tmp_path / str(environment_id) / response.json()["foto"]).exists()
 
     original = response.json()["foto"]
 
@@ -734,7 +740,7 @@ def test_upload_replaces_old_photo_and_removes_new_file_on_db_failure(
             headers=AUTH_HEADERS,
             files={"file": ("fail.webp", IMAGE_BYTES["image/webp"], "image/webp")},
         )
-    assert {path.name for path in tmp_path.iterdir()} == {original}
+    assert {path.name for path in (tmp_path / str(environment_id)).iterdir()} == {original}
 
 
 def test_openapi_lists_old_and_new_integration_methods(client):

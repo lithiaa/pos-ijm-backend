@@ -351,6 +351,7 @@ def test_anonymous_audit_limiter_has_bounded_source_state_and_can_reset():
 
 
 def test_chatbot_logs_only_committed_create_update_and_delete(client, db):
+    authenticate(client, db)
     created = client.post(
         "/api/chatbot/",
         json={"command": "tambah barang nama=Chatbot Audit harga_jual=1000"},
@@ -387,7 +388,8 @@ def test_chatbot_logs_only_committed_create_update_and_delete(client, db):
 def test_chatbot_search_unknown_validation_failure_and_noop_are_not_logged(
     client, db
 ):
-    barang = Barang(sku="CHATBOT-NOOP", nama="Unchanged", harga_jual=100)
+    user = authenticate(client, db)
+    barang = Barang(environment_id=user.environment_id, sku="CHATBOT-NOOP", nama="Unchanged", harga_jual=100)
     db.add(barang)
     db.commit()
 
@@ -417,9 +419,10 @@ def test_chatbot_search_unknown_validation_failure_and_noop_are_not_logged(
     assert audit_rows(client, db) == []
 
 
-def test_successful_anonymous_chatbot_audits_are_rate_limited_per_source(
+def test_authenticated_chatbot_audits_are_not_anonymously_rate_limited(
     client, db
 ):
+    authenticate(client, db)
     from app.audit import reset_anonymous_audit_limiter_for_tests
 
     reset_anonymous_audit_limiter_for_tests(
@@ -439,7 +442,7 @@ def test_successful_anonymous_chatbot_audits_are_rate_limited_per_source(
 
     assert all(response.status_code == 200 for response in responses)
     assert db.query(Barang).filter(Barang.nama.like("Bounded %")).count() == 3
-    assert len(audit_rows(client, db)) == 2
+    assert len(audit_rows(client, db)) == 3
 
 
 def test_skipped_chatbot_audit_does_not_suppress_downstream_exception():

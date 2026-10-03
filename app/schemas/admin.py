@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -36,3 +38,4 @@ class EnvironmentUpdate(BaseModel):
     phone: str | None = Field(None, max_length=50)
     timezone: str | None = Field(None, min_length=1, max_length=100)
     currency: str | None = Field(None, min_length=3, max_length=10)
+    status: Literal["active", "suspended"] | None = None
