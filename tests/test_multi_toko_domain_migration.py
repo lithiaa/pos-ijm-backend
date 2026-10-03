@@ -1,4 +1,5 @@
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,9 @@ class FakeMySQL:
         self.primary_keys = {"integration_stock_operations": ["operation_id"]}
         self.delete_rules = {}  # (table, fk_name) -> DELETE_RULE
         self.unique_constraints = set()  # (table, name)
+        self.foreign_key_names = {}  # (table, child_column, parent_table) -> names
+        self.foreign_key_definitions = {}  # (table, name) -> [(column, table, column)]
+        self.check_constraints = set()
     def execute(self, statement, params=None):
         sql = str(statement); self.sql.append(sql)
         if "SELECT DATABASE()" in sql: return Result("pos")
@@ -45,10 +49,16 @@ class FakeMySQL:
                 return Result(int(((params or {}).get("t"), (params or {}).get("n")) in self.foreign_keys))
             if "CONSTRAINT_TYPE='UNIQUE'" in sql:
                 return Result(int(((params or {}).get("t"), (params or {}).get("n")) in self.unique_constraints))
+            if "CONSTRAINT_TYPE='CHECK'" in sql:
+                return Result(int(((params or {}).get("t"), (params or {}).get("n")) in self.check_constraints))
         if "information_schema.KEY_COLUMN_USAGE" in sql:
             if "CONSTRAINT_NAME='PRIMARY'" in sql:
                 return Result(self.primary_keys.get((params or {}).get("t"), []))
-            return Result([])
+            if "CONSTRAINT_NAME=:n" in sql:
+                key = ((params or {}).get("t"), (params or {}).get("n"))
+                return Result(self.foreign_key_definitions.get(key, []))
+            key = ((params or {}).get("t"), (params or {}).get("c"), (params or {}).get("p"))
+            return Result(self.foreign_key_names.get(key, []))
         if "information_schema.STATISTICS" in sql:
             if "GROUP BY INDEX_NAME" in sql:
                 table = (params or {}).get("t")
@@ -67,12 +77,26 @@ class FakeMySQL:
         if "DROP PRIMARY KEY" in sql:
             self.primary_keys["integration_stock_operations"] = ["environment_id", "operation_id"]
         if "ADD CONSTRAINT" in sql:
-            parts = sql.split("`"); self.foreign_keys.add((parts[1], parts[3]))
-            # Track DELETE_RULE if present
-            if "ON DELETE" in sql:
-                delete_clause = sql.split("ON DELETE")[1].strip()
-                rule = "SET NULL" if delete_clause.startswith("SET NULL") else delete_clause.split()[0]
-                self.delete_rules[(parts[1], parts[3])] = rule
+            parts = sql.split("`")
+            if "CHECK" in sql:
+                self.check_constraints.add((parts[1], parts[3]))
+            else:
+                self.foreign_keys.add((parts[1], parts[3]))
+                match = re.search(
+                    r"FOREIGN KEY \(([^)]+)\) REFERENCES `?([^` (]+)`? \(([^)]+)\)",
+                    sql,
+                )
+                if match:
+                    self.foreign_key_definitions[(parts[1], parts[3])] = list(zip(
+                        [column.strip() for column in match.group(1).split(",")],
+                        [match.group(2)] * len(match.group(1).split(",")),
+                        [column.strip() for column in match.group(3).split(",")],
+                    ))
+                # Track DELETE_RULE if present
+                if "ON DELETE" in sql:
+                    delete_clause = sql.split("ON DELETE")[1].strip()
+                    rule = "SET NULL" if delete_clause.startswith("SET NULL") else delete_clause.split()[0]
+                    self.delete_rules[(parts[1], parts[3])] = rule
         if "DROP FOREIGN KEY" in sql:
             parts = sql.split("`")
             self.foreign_keys.discard((parts[1], parts[3]))
@@ -281,15 +305,68 @@ def test_composite_fk_nullable_behavior_preserved():
     pass
 
 
-def test_audit_logs_env_nullable_no_cross_composite():
+def test_audit_logs_user_composite_fk_replaces_discovered_legacy_fk_after_preflight():
+    migration = load_migration()
+    conn = FakeMySQL()
+    legacy_name = "fk_audit_logs_user_env"
+    conn.foreign_keys.add(("audit_logs", legacy_name))
+    conn.foreign_key_names[("audit_logs", "user_id", "users")] = [legacy_name]
+    conn.foreign_key_definitions[("audit_logs", legacy_name)] = [
+        ("user_id", "users", "id")
+    ]
+
+    migration._migrate_connection(conn)
+
+    sql = "\n".join(conn.sql)
+    preflight = (
+        "SELECT COUNT(*) FROM `audit_logs` child LEFT JOIN `users` parent "
+        "ON parent.id = child.user_id AND parent.environment_id = child.environment_id "
+        "WHERE child.user_id IS NOT NULL AND parent.id IS NULL"
+    )
+    composite = (
+        "ADD CONSTRAINT `fk_audit_logs_user_env` FOREIGN KEY (user_id, environment_id) "
+        "REFERENCES `users` (id, environment_id) ON DELETE SET NULL"
+    )
+    drop = f"ALTER TABLE `audit_logs` DROP FOREIGN KEY `{legacy_name}`"
+    assert preflight in sql
+    check = (
+        "ALTER TABLE `audit_logs` ADD CONSTRAINT `ck_audit_logs_user_environment` "
+        "CHECK (user_id IS NULL OR environment_id IS NOT NULL)"
+    )
+    assert composite in sql
+    assert check in sql
+    assert drop in sql
+    assert sql.index(preflight) < sql.index(drop) < sql.index(composite)
+
+
+def test_audit_log_model_uses_nullable_composite_user_environment_fk():
+    from sqlalchemy import ForeignKeyConstraint
+    from app.models.audit_log import AuditLog
+
+    foreign_keys = [
+        constraint for constraint in AuditLog.__table__.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+    ]
+    assert any(
+        [column.name for column in constraint.columns] == ["user_id", "environment_id"]
+        and [element.target_fullname for element in constraint.elements] == [
+            "users.id", "users.environment_id"
+        ]
+        and constraint.ondelete == "SET NULL"
+        for constraint in foreign_keys
+    )
+    assert AuditLog.__table__.c.user_id.nullable
+    assert AuditLog.__table__.c.environment_id.nullable
+
+
+def test_audit_logs_env_nullable_with_anonymous_rows():
     migration = load_migration()
     conn = FakeMySQL()
     migration._migrate_connection(conn)
     sql = "\n".join(conn.sql)
-    # audit_logs.environment_id is nullable with simple FK SET NULL
-    # Should NOT attempt composite FK with optional resource_ids
     assert "fk_audit_logs_environment_id" in sql
     assert "ON DELETE SET NULL" in sql
+    assert "fk_audit_logs_user_env" in sql
 
 
 def test_domain_migration_refuses_sqlite():

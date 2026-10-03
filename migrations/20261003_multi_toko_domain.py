@@ -28,6 +28,7 @@ TENANT_FKS = (
     ("transaksi_stok", "fk_transaksi_stok_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "RESTRICT", False),
     ("transaksi_stok", "fk_transaksi_stok_supplier_env", "supplier_id, environment_id", "supplier", "id, environment_id", "RESTRICT", True),
     ("transaksi_stok", "fk_transaksi_stok_user_env", "user_id, environment_id", "users", "id, environment_id", "RESTRICT", True),
+    ("audit_logs", "fk_audit_logs_user_env", "user_id, environment_id", "users", "id, environment_id", "SET NULL", True),
     ("barang_foto", "fk_barang_foto_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "CASCADE", False),
     ("print_jobs", "fk_print_jobs_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "RESTRICT", True),
     ("integration_stock_operations", "fk_integration_stock_operations_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "CASCADE", False),
@@ -56,6 +57,21 @@ def _foreign_key_delete_rule(c, schema, table, name):
     return row if isinstance(row, str) else (row[0] if row else None)
 
 
+def _foreign_key_matches(c, schema, table, name, child_cols, parent, parent_cols):
+    rows = c.execute(text(
+        "SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME "
+        "FROM information_schema.KEY_COLUMN_USAGE "
+        "WHERE TABLE_SCHEMA=:s AND TABLE_NAME=:t AND CONSTRAINT_NAME=:n "
+        "ORDER BY ORDINAL_POSITION"
+    ), {"s": schema, "t": table, "n": name}).fetchall()
+    expected = list(zip(
+        [column.strip() for column in child_cols.split(",")],
+        [parent] * len(child_cols.split(",")),
+        [column.strip() for column in parent_cols.split(",")],
+    ))
+    return [tuple(row) for row in rows] == expected
+
+
 def _foreign_key_names(c, schema, table, child_column, parent_table):
     rows = c.execute(text("SELECT DISTINCT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=:s AND TABLE_NAME=:t AND COLUMN_NAME=:c AND REFERENCED_TABLE_NAME=:p"), {"s": schema, "t": table, "c": child_column, "p": parent_table}).fetchall()
     return [row if isinstance(row, str) else row[0] for row in rows]
@@ -73,6 +89,10 @@ def _primary_key_columns(c, schema, table):
 
 def _unique_constraint_exists(c, schema, table, name):
     return bool(c.execute(text("SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=:s AND TABLE_NAME=:t AND CONSTRAINT_NAME=:n AND CONSTRAINT_TYPE='UNIQUE'"), {"s": schema, "t": table, "n": name}).scalar())
+
+
+def _check_constraint_exists(c, schema, table, name):
+    return bool(c.execute(text("SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=:s AND TABLE_NAME=:t AND CONSTRAINT_NAME=:n AND CONSTRAINT_TYPE='CHECK'"), {"s": schema, "t": table, "n": name}).scalar())
 
 
 def _preflight_tenant_fk(c, child, child_cols, parent, nullable):
@@ -145,7 +165,18 @@ def _migrate_connection(c):
 
     for child, name, child_cols, parent, parent_cols, rule, nullable in TENANT_FKS:
         _preflight_tenant_fk(c, child, child_cols, parent, nullable)
-        if _foreign_key_exists(c, schema, child, name) and _foreign_key_delete_rule(c, schema, child, name) != rule:
+        if child == "audit_logs" and not _check_constraint_exists(
+            c, schema, child, "ck_audit_logs_user_environment"
+        ):
+            c.execute(text(
+                "ALTER TABLE `audit_logs` ADD CONSTRAINT "
+                "`ck_audit_logs_user_environment` "
+                "CHECK (user_id IS NULL OR environment_id IS NOT NULL)"
+            ))
+        if _foreign_key_exists(c, schema, child, name) and (
+            _foreign_key_delete_rule(c, schema, child, name) != rule
+            or not _foreign_key_matches(c, schema, child, name, child_cols, parent, parent_cols)
+        ):
             c.execute(text(f"ALTER TABLE `{child}` DROP FOREIGN KEY `{name}`"))
         if not _foreign_key_exists(c, schema, child, name):
             c.execute(text(f"ALTER TABLE `{child}` ADD CONSTRAINT `{name}` FOREIGN KEY ({child_cols}) REFERENCES `{parent}` ({parent_cols}) ON DELETE {rule}"))

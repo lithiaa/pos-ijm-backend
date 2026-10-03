@@ -1,8 +1,10 @@
 from sqlalchemy import (
     BigInteger,
     Column,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     SmallInteger,
     String,
@@ -32,6 +34,18 @@ def _compile_mysql_utc_timestamp_default(_element, _compiler, **_kwargs):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "user_id IS NULL OR environment_id IS NOT NULL",
+            name="ck_audit_logs_user_environment",
+        ).ddl_if(dialect=("mysql", "mariadb")),
+        ForeignKeyConstraint(
+            ("user_id", "environment_id"),
+            ("users.id", "users.environment_id"),
+            name="fk_audit_logs_user_env",
+            ondelete="SET NULL",
+        ),
+    )
 
     id = Column(
         BigInteger().with_variant(Integer, "sqlite"),
@@ -50,12 +64,7 @@ class AuditLog(Base):
         server_default=UtcTimestamp(),
         index=True,
     )
-    user_id = Column(
-        Integer,
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
+    user_id = Column(Integer, nullable=True, index=True)
     username = Column(String(100), nullable=True, index=True)
     action = Column(String(10), nullable=False, index=True)
     http_method = Column(String(10), nullable=False)

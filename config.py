@@ -3,7 +3,6 @@ from secrets import token_urlsafe
 from urllib.parse import urlsplit
 
 
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -49,8 +48,20 @@ def _validate_production_config() -> None:
         invalid.append("POS_INTEGRATION_KEY")
     if not os.getenv("CORS_ORIGINS") or not CORS_ORIGINS or "*" in CORS_ORIGINS:
         invalid.append("CORS_ORIGINS")
-    activation_url = urlsplit(INVITE_ACTIVATION_URL)
-    if not os.getenv("INVITE_ACTIVATION_URL") or activation_url.scheme not in {"http", "https"} or not activation_url.netloc:
+    try:
+        activation_url = urlsplit(INVITE_ACTIVATION_URL)
+        activation_url.port
+    except ValueError:
+        activation_url = None
+    if (
+        not os.getenv("INVITE_ACTIVATION_URL")
+        or activation_url is None
+        or activation_url.scheme != "https"
+        or not activation_url.netloc
+        or activation_url.username
+        or activation_url.password
+        or activation_url.fragment
+    ):
         invalid.append("INVITE_ACTIVATION_URL")
     for name in ("ADMIN_USERNAME", "ADMIN_PASSWORD"):
         if os.getenv(name):
