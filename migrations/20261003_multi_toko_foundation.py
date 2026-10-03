@@ -33,6 +33,15 @@ def _column_exists(c, schema: str, table: str, column: str) -> bool:
     return bool(c.execute(text(q), {"s": schema, "t": table, "c": column}).scalar())
 
 
+def _check_clause(c, schema: str, name: str):
+    return c.execute(text(
+        "SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS cc "
+        "JOIN information_schema.TABLE_CONSTRAINTS tc "
+        "ON tc.CONSTRAINT_SCHEMA=cc.CONSTRAINT_SCHEMA AND tc.CONSTRAINT_NAME=cc.CONSTRAINT_NAME "
+        "WHERE tc.TABLE_SCHEMA=:s AND tc.TABLE_NAME='users' AND tc.CONSTRAINT_NAME=:n"
+    ), {"s": schema, "n": name}).scalar()
+
+
 def _migrate_connection(c) -> dict:
     if c.dialect.name not in {"mysql", "mariadb"}:
         raise RuntimeError("Migration supports MySQL/MariaDB only")
@@ -101,29 +110,28 @@ def _migrate_connection(c) -> dict:
             "WHERE environment_id IS NULL AND LOWER(role) != 'platform_owner'"
         )
     )
-    invalid_users = c.execute(
-        text(
-            "SELECT COUNT(*) FROM users "
-            "WHERE environment_id IS NULL AND LOWER(role) != 'platform_owner'"
-        )
-    ).scalar()
+    invalid_users = c.execute(text(
+        "SELECT COUNT(*) FROM users WHERE "
+        "(LOWER(role) = 'platform_owner' AND environment_id IS NOT NULL) OR "
+        "(LOWER(role) != 'platform_owner' AND environment_id IS NULL)"
+    )).scalar()
     if invalid_users:
-        raise RuntimeError("Preflight failed: non-platform users still have NULL environment_id")
-    constraint = c.execute(
-        text(
-            "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
-            "WHERE TABLE_SCHEMA=:s AND TABLE_NAME='users' "
-            "AND CONSTRAINT_NAME='ck_users_environment_or_platform_owner'"
-        ),
-        {"s": schema},
-    ).scalar()
+        raise RuntimeError("Preflight failed: platform owners must have NULL environment_id and tenant users require environment_id")
+    name = "ck_users_environment_or_platform_owner"
+    expected = "(role = 'platform_owner' AND environment_id IS NULL) OR (role != 'platform_owner' AND environment_id IS NOT NULL)"
+    constraint = c.execute(text(
+        "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+        "WHERE TABLE_SCHEMA=:s AND TABLE_NAME='users' AND CONSTRAINT_NAME=:n "
+        "AND CONSTRAINT_TYPE='CHECK'"
+    ), {"s": schema, "n": name}).scalar()
+    if constraint:
+        clause = _check_clause(c, schema, name)
+        normalized = "".join(str(clause).lower().replace("`", "").split())
+        if normalized != "".join(expected.lower().split()):
+            c.execute(text(f"ALTER TABLE users DROP CHECK `{name}`"))
+            constraint = False
     if not constraint:
-        c.execute(
-            text(
-                "ALTER TABLE users ADD CONSTRAINT ck_users_environment_or_platform_owner "
-                "CHECK (role = 'platform_owner' OR environment_id IS NOT NULL)"
-            )
-        )
+        c.execute(text(f"ALTER TABLE users ADD CONSTRAINT `{name}` CHECK ({expected})"))
 
     return {
         "environments_created": environments_created,

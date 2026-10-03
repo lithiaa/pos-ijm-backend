@@ -64,7 +64,36 @@ def test_user_environment_nullability_is_limited_to_platform_owner_by_db_check()
         for constraint in User.__table__.constraints
         if isinstance(constraint, CheckConstraint)
     }
-    assert "role = 'platform_owner' OR environment_id IS NOT NULL" in checks
+    assert "(role = 'platform_owner' AND environment_id IS NULL) OR (role != 'platform_owner' AND environment_id IS NOT NULL)" in checks
+
+
+def test_user_composite_key_and_transaction_user_fk_are_environment_scoped():
+    from sqlalchemy import ForeignKeyConstraint, UniqueConstraint
+    from app.models.transaksi import TransaksiStok
+
+    assert any(
+        constraint.name == "uq_users_id_env" and [column.name for column in constraint.columns] == ["id", "environment_id"]
+        for constraint in User.__table__.constraints if isinstance(constraint, UniqueConstraint)
+    )
+    assert any(
+        constraint.name == "fk_transaksi_stok_user_env"
+        and constraint.ondelete == "RESTRICT"
+        and [element.parent.name for element in constraint.elements] == ["user_id", "environment_id"]
+        for constraint in TransaksiStok.__table__.constraints if isinstance(constraint, ForeignKeyConstraint)
+    )
+
+
+def test_platform_owner_with_environment_is_rejected(client, db):
+    from app.models.environment import Environment
+
+    env = Environment(slug="owner-invalid-env", name="Owner Invalid", status="active")
+    db.add(env); db.flush()
+    owner = User(username="owner-invalid-env", password_hash="hashed", nama="Owner", role="platform_owner", environment_id=env.id, status="active")
+    db.add(owner); db.commit(); db.refresh(owner)
+
+    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {create_token(owner.id)}"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Platform Owner cannot belong to an environment"
 
 
 def test_permissions_normalizer():
@@ -258,8 +287,11 @@ def test_require_permission_dependency_and_helper(client, db):
     def sample_endpoint(principal=Depends(require_permission("barang.write"))):
         return {"ok": True, "user_id": principal.id}
 
+    from app.models.environment import Environment
+    environment = Environment(slug="permission-env", name="Permission Env", status="active")
+    db.add(environment); db.flush()
     user_with_perm = User(
-        username="writer-user",
+        username="writer-user", environment_id=environment.id,
         password_hash="hashed",
         nama="Writer",
         role="staff",
@@ -267,7 +299,7 @@ def test_require_permission_dependency_and_helper(client, db):
         permissions=json.dumps(["barang.write"]),
     )
     user_without_perm = User(
-        username="reader-user",
+        username="reader-user", environment_id=environment.id,
         password_hash="hashed",
         nama="Reader",
         role="staff",

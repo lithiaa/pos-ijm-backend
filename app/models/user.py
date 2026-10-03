@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -6,8 +6,10 @@ from app.database import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
+        UniqueConstraint("id", "environment_id", name="uq_users_id_env"),
         CheckConstraint(
-            "role = 'platform_owner' OR environment_id IS NOT NULL",
+            "(role = 'platform_owner' AND environment_id IS NULL) OR "
+            "(role != 'platform_owner' AND environment_id IS NOT NULL)",
             name="ck_users_environment_or_platform_owner",
         ).ddl_if(dialect=("mysql", "mariadb")),
     )

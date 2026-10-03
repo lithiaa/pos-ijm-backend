@@ -15,6 +15,7 @@ def load_migration():
 class Result:
     def __init__(self, value=None): self.value = value
     def scalar(self): return self.value
+    def fetchall(self): return self.value if isinstance(self.value, list) else []
 
 
 class FakeMySQL:
@@ -41,7 +42,7 @@ class FakeMySQL:
             self.tables.add(sql.split("`")[1])
         if "ADD COLUMN" in sql:
             parts = sql.split("`"); self.columns.add((parts[1], parts[3]))
-        if "ADD UNIQUE INDEX" in sql or "ADD INDEX" in sql:
+        if "ADD UNIQUE INDEX" in sql or "ADD UNIQUE KEY" in sql or "ADD INDEX" in sql:
             parts = sql.split("`"); self.indexes.add((parts[1], parts[3]))
         return Result()
 
@@ -69,3 +70,20 @@ def test_admin_migration_rejects_non_mysql():
     migration = load_migration(); conn = FakeMySQL(); conn.dialect.name = "sqlite"
     with pytest.raises(RuntimeError, match="MySQL/MariaDB"):
         migration._migrate_connection(conn)
+
+
+def test_admin_migration_scopes_provision_and_invitation_users_to_environment():
+    migration = load_migration(); conn = FakeMySQL()
+    migration._migrate_connection(conn)
+    migration._migrate_connection(conn)
+    sql = "\n".join(row[0] for row in conn.sql)
+
+    parent_key = "ALTER TABLE `users` ADD UNIQUE KEY `uq_users_id_env` (id, environment_id)"
+    assert parent_key in sql
+    assert sql.index(parent_key) < sql.index("CREATE TABLE `environment_provision_requests`")
+    assert "CONSTRAINT `fk_provision_request_administrator_env` FOREIGN KEY (`administrator_id`, `environment_id`) REFERENCES `users` (`id`, `environment_id`) ON DELETE RESTRICT" in sql
+    assert "CONSTRAINT `fk_invitation_user_env` FOREIGN KEY (`user_id`, `environment_id`) REFERENCES `users` (`id`, `environment_id`) ON DELETE RESTRICT" in sql
+    assert "FOREIGN KEY (`administrator_id`) REFERENCES `users` (`id`)" not in sql
+    assert "FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)" not in sql
+    assert "environment_provision_requests` child LEFT JOIN `users` parent" in sql
+    assert "user_invitations` child LEFT JOIN `users` parent" in sql

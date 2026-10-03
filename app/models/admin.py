@@ -1,24 +1,40 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Column, DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, func
 
 from app.database import Base
 
 
 class ProvisionRequest(Base):
     __tablename__ = "environment_provision_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("administrator_id", "environment_id"),
+            ("users.id", "users.environment_id"),
+            name="fk_provision_request_administrator_env",
+            ondelete="RESTRICT",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     request_key = Column(String(200), unique=True, nullable=False, index=True)
     request_hash = Column(String(64), nullable=False)
     environment_id = Column(Integer, ForeignKey("environments.id"), nullable=False)
-    administrator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    administrator_id = Column(Integer, nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
 
 class Invitation(Base):
     __tablename__ = "user_invitations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("user_id", "environment_id"),
+            ("users.id", "users.environment_id"),
+            name="fk_invitation_user_env",
+            ondelete="RESTRICT",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
     environment_id = Column(Integer, ForeignKey("environments.id"), nullable=False, index=True)
     token_hash = Column(String(64), unique=True, nullable=False, index=True)
     expires_at = Column(DateTime, nullable=False)

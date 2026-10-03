@@ -242,6 +242,7 @@ def test_child_composite_fks_reference_parent_unique_keys():
         "ADD CONSTRAINT `fk_stok_saat_ini_barang_env` FOREIGN KEY (barang_id, environment_id) REFERENCES `barang` (id, environment_id) ON DELETE RESTRICT",
         "ADD CONSTRAINT `fk_transaksi_stok_barang_env` FOREIGN KEY (barang_id, environment_id) REFERENCES `barang` (id, environment_id) ON DELETE RESTRICT",
         "ADD CONSTRAINT `fk_transaksi_stok_supplier_env` FOREIGN KEY (supplier_id, environment_id) REFERENCES `supplier` (id, environment_id) ON DELETE RESTRICT",
+        "ADD CONSTRAINT `fk_transaksi_stok_user_env` FOREIGN KEY (user_id, environment_id) REFERENCES `users` (id, environment_id) ON DELETE RESTRICT",
         "ADD CONSTRAINT `fk_barang_foto_barang_env` FOREIGN KEY (barang_id, environment_id) REFERENCES `barang` (id, environment_id) ON DELETE CASCADE",
         "ADD CONSTRAINT `fk_print_jobs_barang_env` FOREIGN KEY (barang_id, environment_id) REFERENCES `barang` (id, environment_id) ON DELETE RESTRICT",
         "ADD CONSTRAINT `fk_integration_stock_operations_barang_env` FOREIGN KEY (barang_id, environment_id) REFERENCES `barang` (id, environment_id) ON DELETE CASCADE",

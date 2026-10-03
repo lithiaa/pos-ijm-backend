@@ -17,6 +17,7 @@ TABLES = (
 PARENT_KEYS = (
     ("barang", "uq_barang_id_env"),
     ("supplier", "uq_supplier_id_env"),
+    ("users", "uq_users_id_env"),
 )
 # child, name, columns, parent, parent columns, delete behavior, nullable child ID
 TENANT_FKS = (
@@ -26,6 +27,7 @@ TENANT_FKS = (
     ("stok_saat_ini", "fk_stok_saat_ini_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "RESTRICT", False),
     ("transaksi_stok", "fk_transaksi_stok_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "RESTRICT", False),
     ("transaksi_stok", "fk_transaksi_stok_supplier_env", "supplier_id, environment_id", "supplier", "id, environment_id", "RESTRICT", True),
+    ("transaksi_stok", "fk_transaksi_stok_user_env", "user_id, environment_id", "users", "id, environment_id", "RESTRICT", True),
     ("barang_foto", "fk_barang_foto_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "CASCADE", False),
     ("print_jobs", "fk_print_jobs_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "RESTRICT", True),
     ("integration_stock_operations", "fk_integration_stock_operations_barang_env", "barang_id, environment_id", "barang", "id, environment_id", "CASCADE", False),

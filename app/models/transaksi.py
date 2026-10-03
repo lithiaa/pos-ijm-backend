@@ -38,6 +38,12 @@ class TransaksiStok(Base):
             name="fk_transaksi_stok_supplier_env",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ("user_id", "environment_id"),
+            ("users.id", "users.environment_id"),
+            name="fk_transaksi_stok_user_env",
+            ondelete="RESTRICT",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -49,7 +55,7 @@ class TransaksiStok(Base):
     harga_satuan = Column(Integer, nullable=True)
     total_harga = Column(BigInteger, nullable=True)
     keterangan = Column(Text, nullable=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     barang = relationship("Barang")

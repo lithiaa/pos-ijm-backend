@@ -57,6 +57,9 @@ class FakeMySQLConnection:
                 return Result(1 if (t, c) in self.columns else 0)
             return Result(1 if t in self.tables else 0)
 
+        if "information_schema.CHECK_CONSTRAINTS" in sql:
+            return Result("(role = 'platform_owner' AND environment_id IS NULL) OR (role != 'platform_owner' AND environment_id IS NOT NULL)")
+
         if "information_schema.TABLE_CONSTRAINTS" in sql:
             return Result(1 if "ck_users_environment_or_platform_owner" in self.tables else 0)
 
@@ -76,7 +79,7 @@ class FakeMySQLConnection:
                     self.columns.add(("users", col))
             return Result()
 
-        if "ADD CONSTRAINT ck_users_environment_or_platform_owner" in sql:
+        if "ADD CONSTRAINT `ck_users_environment_or_platform_owner`" in sql:
             self.tables.add("ck_users_environment_or_platform_owner")
             return Result()
 

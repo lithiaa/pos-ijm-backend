@@ -50,6 +50,33 @@ def _index(connection, schema, table, name):
     return _exists(connection, schema, "STATISTICS", table, name)
 
 
+def _foreign_key_exists(connection, schema, table, name):
+    return bool(connection.execute(text(
+        "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA=:s AND TABLE_NAME=:t AND CONSTRAINT_NAME=:n "
+        "AND CONSTRAINT_TYPE='FOREIGN KEY'"
+    ), {"s": schema, "t": table, "n": name}).scalar())
+
+
+def _foreign_key_names(connection, schema, table, child_column):
+    rows = connection.execute(text(
+        "SELECT DISTINCT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE "
+        "WHERE TABLE_SCHEMA=:s AND TABLE_NAME=:t AND COLUMN_NAME=:c "
+        "AND REFERENCED_TABLE_NAME='users'"
+    ), {"s": schema, "t": table, "c": child_column}).fetchall()
+    return [row if isinstance(row, str) else row[0] for row in rows]
+
+
+def _preflight_user_environment(connection, table, user_column):
+    mismatches = connection.execute(text(
+        f"SELECT COUNT(*) FROM `{table}` child LEFT JOIN `users` parent "
+        f"ON parent.id = child.{user_column} AND parent.environment_id = child.environment_id "
+        f"WHERE parent.id IS NULL"
+    )).scalar()
+    if mismatches:
+        raise RuntimeError(f"Preflight failed: {table}.{user_column} has orphan or cross-environment users")
+
+
 def _migrate_connection(connection):
     if connection.dialect.name not in {"mysql", "mariadb"}:
         raise RuntimeError("Migration supports MySQL/MariaDB only")
@@ -66,6 +93,9 @@ def _migrate_connection(connection):
     if not _index(connection, schema, "users", "uq_users_email"):
         connection.execute(text("ALTER TABLE `users` ADD UNIQUE INDEX `uq_users_email` (`email`)"))
         indexes_added.append("uq_users_email")
+    if not _index(connection, schema, "users", "uq_users_id_env"):
+        connection.execute(text("ALTER TABLE `users` ADD UNIQUE KEY `uq_users_id_env` (id, environment_id)"))
+        indexes_added.append("uq_users_id_env")
 
     statements = {
         "environment_provision_requests": """CREATE TABLE `environment_provision_requests` (
@@ -74,14 +104,14 @@ def _migrate_connection(connection):
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (`id`),
             UNIQUE INDEX `uq_provision_request_key` (`request_key`),
             FOREIGN KEY (`environment_id`) REFERENCES `environments` (`id`),
-            FOREIGN KEY (`administrator_id`) REFERENCES `users` (`id`))""",
+            CONSTRAINT `fk_provision_request_administrator_env` FOREIGN KEY (`administrator_id`, `environment_id`) REFERENCES `users` (`id`, `environment_id`) ON DELETE RESTRICT)""",
         "user_invitations": """CREATE TABLE `user_invitations` (
             `id` INT NOT NULL AUTO_INCREMENT, `user_id` INT NOT NULL, `environment_id` INT NOT NULL,
             `token_hash` CHAR(64) NOT NULL, `expires_at` DATETIME NOT NULL, `accepted_at` DATETIME NULL,
             `revoked_at` DATETIME NULL, `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`), UNIQUE INDEX `uq_invitation_token_hash` (`token_hash`),
             INDEX `ix_invitation_user` (`user_id`), INDEX `ix_invitation_environment` (`environment_id`),
-            FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+            CONSTRAINT `fk_invitation_user_env` FOREIGN KEY (`user_id`, `environment_id`) REFERENCES `users` (`id`, `environment_id`) ON DELETE RESTRICT,
             FOREIGN KEY (`environment_id`) REFERENCES `environments` (`id`))""",
         "support_grants": """CREATE TABLE `support_grants` (
             `id` INT NOT NULL AUTO_INCREMENT, `environment_id` INT NOT NULL, `platform_owner_id` INT NOT NULL,
@@ -109,6 +139,23 @@ def _migrate_connection(connection):
         if not _table(connection, schema, table):
             connection.execute(text(statements[table]))
             tables_created.append(table)
+
+    for table, user_column, constraint in (
+        ("environment_provision_requests", "administrator_id", "fk_provision_request_administrator_env"),
+        ("user_invitations", "user_id", "fk_invitation_user_env"),
+    ):
+        if table in tables_created:
+            continue
+        _preflight_user_environment(connection, table, user_column)
+        for legacy in _foreign_key_names(connection, schema, table, user_column):
+            if legacy != constraint:
+                connection.execute(text(f"ALTER TABLE `{table}` DROP FOREIGN KEY `{legacy}`"))
+        if not _foreign_key_exists(connection, schema, table, constraint):
+            connection.execute(text(
+                f"ALTER TABLE `{table}` ADD CONSTRAINT `{constraint}` "
+                f"FOREIGN KEY (`{user_column}`, `environment_id`) "
+                "REFERENCES `users` (`id`, `environment_id`) ON DELETE RESTRICT"
+            ))
 
     return {
         "tables_created": tables_created,

@@ -194,6 +194,10 @@ def get_current_principal(
 
     if user.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account is disabled")
+    if (user.role or "").lower() == "platform_owner" and user.environment_id is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Platform Owner cannot belong to an environment")
+    if (user.role or "").lower() != "platform_owner" and user.environment_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not assigned to an environment")
 
     env: Environment | None = None
     if user.environment_id is not None:
