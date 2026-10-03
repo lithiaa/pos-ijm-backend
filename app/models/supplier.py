@@ -5,7 +5,10 @@ from app.database import Base
 
 class Supplier(Base):
     __tablename__ = "supplier"
-    __table_args__ = (UniqueConstraint("environment_id", "kode_supplier", name="uq_supplier_env_kode"),)
+    __table_args__ = (
+        UniqueConstraint("environment_id", "kode_supplier", name="uq_supplier_env_kode"),
+        UniqueConstraint("id", "environment_id", name="uq_supplier_id_env"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     environment_id = Column(Integer, ForeignKey("environments.id"), nullable=False, index=True)
@@ -17,4 +20,4 @@ class Supplier(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     barang = relationship("Barang", back_populates="supplier")
-    barang_links = relationship("BarangSupplier", back_populates="supplier")
+    barang_links = relationship("BarangSupplier", back_populates="supplier", overlaps="barang,supplier_links")
