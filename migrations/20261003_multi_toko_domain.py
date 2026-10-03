@@ -32,7 +32,13 @@ def _foreign_key_exists(c, schema, table, name):
 
 
 def _legacy_unique_indexes(c, schema, table, column):
-    return [row if isinstance(row, str) else row[0] for row in c.execute(text("SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=:s AND TABLE_NAME=:t AND NON_UNIQUE=0 GROUP BY INDEX_NAME HAVING COUNT(*)=1 AND MAX(COLUMN_NAME)=:c"), {"s": schema, "t": table, "c": column}).fetchall()]
+    rows = c.execute(text("SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=:s AND TABLE_NAME=:t AND NON_UNIQUE=0 AND INDEX_NAME <> 'PRIMARY' GROUP BY INDEX_NAME HAVING COUNT(*)=1 AND MAX(COLUMN_NAME)=:c"), {"s": schema, "t": table, "c": column}).fetchall()
+    return [row if isinstance(row, str) else row[0] for row in rows]
+
+
+def _primary_key_columns(c, schema, table):
+    rows = c.execute(text("SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=:s AND TABLE_NAME=:t AND CONSTRAINT_NAME='PRIMARY' ORDER BY ORDINAL_POSITION"), {"s": schema, "t": table}).fetchall()
+    return [row if isinstance(row, str) else row[0] for row in rows]
 
 
 def _migrate_connection(c):
@@ -44,10 +50,12 @@ def _migrate_connection(c):
         c.execute(text("INSERT INTO environments (slug,name,status) VALUES ('lithia-autoparts','Lithia Autoparts','active')"))
         env = c.execute(text("SELECT id FROM environments WHERE slug='lithia-autoparts'")).scalar()
     added = []
+    required_tables = tuple(table for table in TABLES if table != "audit_logs")
     for table in TABLES:
         if not _exists(c, schema, table, "environment_id"):
             c.execute(text(f"ALTER TABLE `{table}` ADD COLUMN environment_id INT NULL"))
             added.append(table)
+    for table in required_tables:
         c.execute(text(f"UPDATE `{table}` SET environment_id=:e WHERE environment_id IS NULL"), {"e": env})
         missing = c.execute(text(f"SELECT COUNT(*) FROM `{table}` WHERE environment_id IS NULL")).scalar()
         if missing:
@@ -55,20 +63,30 @@ def _migrate_connection(c):
         unresolved = c.execute(text(f"SELECT COUNT(*) FROM `{table}` d LEFT JOIN environments e ON e.id = d.environment_id WHERE e.id IS NULL")).scalar()
         if unresolved:
             raise RuntimeError(f"Preflight failed: {table} has unknown environment_id rows")
-        index = f"ix_{table}_environment_id"
-        if not _index_exists(c, schema, table, index):
-            c.execute(text(f"ALTER TABLE `{table}` ADD INDEX `{index}` (environment_id)"))
-    for table, column in (("barang", "sku"), ("supplier", "kode_supplier"), ("integration_stock_operations", "operation_id")):
+    for table, column in (("barang", "sku"), ("supplier", "kode_supplier")):
         for index in _legacy_unique_indexes(c, schema, table, column):
             c.execute(text(f"ALTER TABLE `{table}` DROP INDEX `{index}`"))
-    for table, columns, name in (("barang", "environment_id, sku", "uq_barang_env_sku"), ("supplier", "environment_id, kode_supplier", "uq_supplier_env_kode"), ("integration_stock_operations", "environment_id, operation_id", "uq_iso_env_opid")):
+    for table, columns, name in (("barang", "environment_id, sku", "uq_barang_env_sku"), ("supplier", "environment_id, kode_supplier", "uq_supplier_env_kode")):
         if not _index_exists(c, schema, table, name):
             dup_check = c.execute(text(f"SELECT COUNT(*) FROM `{table}` GROUP BY {columns} HAVING COUNT(*) > 1")).fetchall()
             if dup_check:
                 raise RuntimeError(f"Cannot create unique index {name} on {table}: duplicates exist")
             c.execute(text(f"ALTER TABLE `{table}` ADD UNIQUE INDEX `{name}` ({columns})"))
-    for table in TABLES:
+    operation_columns = "environment_id, operation_id"
+    duplicates = c.execute(text(f"SELECT COUNT(*) FROM `integration_stock_operations` GROUP BY {operation_columns} HAVING COUNT(*) > 1")).fetchall()
+    if duplicates:
+        raise RuntimeError("Cannot create composite primary key on integration_stock_operations: duplicates exist")
+    if _primary_key_columns(c, schema, "integration_stock_operations") != ["environment_id", "operation_id"]:
+        c.execute(text("ALTER TABLE `integration_stock_operations` DROP PRIMARY KEY, ADD PRIMARY KEY (environment_id, operation_id)"))
+    for table in required_tables:
         c.execute(text(f"ALTER TABLE `{table}` MODIFY COLUMN environment_id INT NOT NULL"))
+    unresolved_audits = c.execute(text("SELECT COUNT(*) FROM `audit_logs` d LEFT JOIN environments e ON e.id = d.environment_id WHERE d.environment_id IS NOT NULL AND e.id IS NULL")).scalar()
+    if unresolved_audits:
+        raise RuntimeError("Preflight failed: audit_logs has unknown environment_id rows")
+    for table in TABLES:
+        index = f"ix_{table}_environment_id"
+        if not _index_exists(c, schema, table, index):
+            c.execute(text(f"ALTER TABLE `{table}` ADD INDEX `{index}` (environment_id)"))
         foreign_key = f"fk_{table}_environment_id"
         if not _foreign_key_exists(c, schema, table, foreign_key):
             c.execute(text(f"ALTER TABLE `{table}` ADD CONSTRAINT `{foreign_key}` FOREIGN KEY (environment_id) REFERENCES environments(id)"))

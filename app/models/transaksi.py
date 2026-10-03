@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import BigInteger, Column, Integer, String, Text, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -36,9 +36,8 @@ class TransaksiStok(Base):
 
 class IntegrationStockOperation(Base):
     __tablename__ = "integration_stock_operations"
-    __table_args__ = (UniqueConstraint("environment_id", "operation_id", name="uq_iso_env_opid"),)
 
-    environment_id = Column(Integer, ForeignKey("environments.id"), nullable=False, index=True)
+    environment_id = Column(Integer, ForeignKey("environments.id"), primary_key=True)
     operation_id = Column(String(36), primary_key=True)
     barang_id = Column(
         Integer,

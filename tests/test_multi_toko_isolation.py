@@ -194,6 +194,20 @@ class TestDashboardIsolation:
 
 
 class TestLogsIsolation:
+    def test_anonymous_audit_log_survives_and_toko_admin_cannot_list_it(self, client, db):
+        env_a, env_b, user_a, user_b = _setup_two_tokos(db)
+        from app.models.audit_log import AuditLog
+        db.add_all([
+            AuditLog(user_id=user_a.id, username="admin-a", action="CREATE", http_method="POST", resource="barang", path="/api/barang", status_code=200, summary="{}", environment_id=env_a.id),
+            AuditLog(user_id=None, username=None, action="CREATE", http_method="POST", resource="auth", path="/api/auth/login", status_code=401, summary="{}", environment_id=None),
+        ])
+        db.commit()
+        assert db.query(AuditLog).filter(AuditLog.environment_id.is_(None)).count() == 1
+        response = client.get("/api/logs", headers=_auth(user_a))
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+        assert [row["username"] for row in response.json()["data"]] == ["admin-a"]
+
     def test_logs_only_own_environment(self, client, db):
         env_a, env_b, user_a, user_b = _setup_two_tokos(db)
         from app.models.audit_log import AuditLog

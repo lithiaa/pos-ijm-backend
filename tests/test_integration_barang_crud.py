@@ -452,7 +452,7 @@ def test_delete_rejects_print_history_without_partial_cleanup(
     assert db.get(PrintJob, print_job_id) is not None
     assert db.query(StokSaatIni).filter_by(barang_id=barang_id).count() == 1
     assert db.get(TransaksiStok, transaction_id) is not None
-    assert db.get(IntegrationStockOperation, operation_id) is not None
+    assert db.get(IntegrationStockOperation, (operation.environment_id, operation_id)) is not None
     assert (tmp_path / "printed.jpg").read_bytes() == b"photo"
 
 
@@ -501,7 +501,7 @@ def test_delete_concurrent_print_job_conflict_rolls_back_and_keeps_photo(
     assert db.query(PrintJob).filter_by(barang_id=barang_id).count() == 1
     assert db.query(StokSaatIni).filter_by(barang_id=barang_id).count() == 1
     assert db.get(TransaksiStok, transaction_id) is not None
-    assert db.get(IntegrationStockOperation, operation_id) is not None
+    assert db.get(IntegrationStockOperation, (operation.environment_id, operation_id)) is not None
     assert (tmp_path / "race.jpg").read_bytes() == b"photo"
 
 
