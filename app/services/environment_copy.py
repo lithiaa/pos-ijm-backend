@@ -16,21 +16,23 @@ from app.routers.upload import STORAGE_DIR
 SETTINGS = ("business_type", "logo_url", "address", "phone", "timezone", "currency")
 
 
-def _copy_photo(source_filename: str, target_environment_id: int) -> str:
+def _copy_photo(source_filename: str, source_environment_id: int, target_environment_id: int | None = None) -> str:
     if not source_filename or source_filename != os.path.basename(source_filename):
         raise ValueError("Source filename must be a plain storage filename")
-    extension = os.path.splitext(source_filename)[1]
-    target_name = f"{target_environment_id}/{uuid.uuid4()}{extension}"
-    source_path = os.path.join(STORAGE_DIR, source_filename)
-    target_path = os.path.join(STORAGE_DIR, target_name)
+    if target_environment_id is None:
+        raise ValueError("Target environment is required")
+    filename = f"{uuid.uuid4()}{os.path.splitext(source_filename)[1]}"
     storage_root = os.path.realpath(STORAGE_DIR)
-    if os.path.commonpath((storage_root, os.path.realpath(source_path))) != storage_root:
+    source_path = os.path.realpath(os.path.join(storage_root, str(source_environment_id), source_filename))
+    target_dir = os.path.realpath(os.path.join(storage_root, str(target_environment_id)))
+    target_path = os.path.join(target_dir, filename)
+    if os.path.commonpath((storage_root, source_path)) != storage_root:
         raise ValueError("Source filename must be within storage directory")
-    if os.path.commonpath((storage_root, os.path.realpath(os.path.dirname(target_path)))) != storage_root:
+    if os.path.commonpath((storage_root, target_dir)) != storage_root:
         raise ValueError("Target path traversal detected")
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    os.makedirs(target_dir, exist_ok=True)
     shutil.copy2(source_path, target_path)
-    return target_name
+    return filename
 
 
 def run_copy_job(db: Session, job: EnvironmentCopyJob) -> None:
@@ -101,7 +103,7 @@ def run_copy_job(db: Session, job: EnvironmentCopyJob) -> None:
                 for photo in db.query(BarangFoto).filter_by(environment_id=source.id).order_by(BarangFoto.id):
                     if photo.barang_id not in barang_map:
                         continue
-                    filename = _copy_photo(photo.filename, target.id)
+                    filename = _copy_photo(photo.filename, source.id, target.id)
                     created_files.append(filename)
                     db.add(BarangFoto(environment_id=target.id, barang_id=barang_map[photo.barang_id], filename=filename, urutan=photo.urutan))
                     copied_barang = db.get(Barang, barang_map[photo.barang_id])
@@ -117,7 +119,7 @@ def run_copy_job(db: Session, job: EnvironmentCopyJob) -> None:
         db.rollback()
         for filename in created_files:
             try:
-                os.remove(os.path.join(STORAGE_DIR, filename))
+                os.remove(os.path.join(STORAGE_DIR, str(target.id), filename))
             except OSError:
                 pass
         raise

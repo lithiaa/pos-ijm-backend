@@ -95,6 +95,33 @@ class FakeMySQLConnection:
         return Result()
 
 
+class FakeConstraintConnection:
+    class Dialect:
+        def __init__(self, name): self.name = name
+
+    def __init__(self, dialect_name):
+        self.dialect = self.Dialect(dialect_name)
+        self.statements = []
+
+    def execute(self, statement, parameters=None):
+        self.statements.append(str(statement))
+
+
+def test_migration_drops_check_with_dialect_specific_valid_ddl():
+    migration = load_migration()
+    name = "ck_users_environment_or_platform_owner"
+    mysql = FakeConstraintConnection("mysql")
+    mariadb = FakeConstraintConnection("mariadb")
+
+    migration._drop_check_constraint(mysql, name)
+    migration._drop_check_constraint(mariadb, name)
+
+    assert mysql.statements == [f"ALTER TABLE users DROP CHECK `{name}`"]
+    assert mariadb.statements == [f"ALTER TABLE users DROP CONSTRAINT `{name}`"]
+    assert not any("DROP CHECK" in sql for sql in mariadb.statements)
+    assert not any("DROP CONSTRAINT" in sql for sql in mysql.statements)
+
+
 def test_migration_refuses_non_mysql_connection():
     migration = load_migration()
     conn = FakeMySQLConnection()

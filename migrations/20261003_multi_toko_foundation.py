@@ -42,6 +42,11 @@ def _check_clause(c, schema: str, name: str):
     ), {"s": schema, "n": name}).scalar()
 
 
+def _drop_check_constraint(c, name: str) -> None:
+    operation = "DROP CONSTRAINT" if c.dialect.name == "mariadb" else "DROP CHECK"
+    c.execute(text(f"ALTER TABLE users {operation} `{name}`"))
+
+
 def _migrate_connection(c) -> dict:
     if c.dialect.name not in {"mysql", "mariadb"}:
         raise RuntimeError("Migration supports MySQL/MariaDB only")
@@ -128,7 +133,7 @@ def _migrate_connection(c) -> dict:
         clause = _check_clause(c, schema, name)
         normalized = "".join(str(clause).lower().replace("`", "").split())
         if normalized != "".join(expected.lower().split()):
-            c.execute(text(f"ALTER TABLE users DROP CHECK `{name}`"))
+            _drop_check_constraint(c, name)
             constraint = False
     if not constraint:
         c.execute(text(f"ALTER TABLE users ADD CONSTRAINT `{name}` CHECK ({expected})"))

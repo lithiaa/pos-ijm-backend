@@ -47,7 +47,8 @@ def _fixture(db, tmp_path):
         User(username="source-user", password_hash="x", nama="Source User", email="source-user@example.test", role="viewer", environment_id=source.id, status="active"),
     ])
     photo_dir = tmp_path / "photos"; photo_dir.mkdir()
-    (photo_dir / "source.jpg").write_bytes(b"photo")
+    source_photo_dir = photo_dir / str(source.id); source_photo_dir.mkdir()
+    (source_photo_dir / "source.jpg").write_bytes(b"photo")
     db.add(BarangFoto(environment_id=source.id, barang_id=barang.id, filename="source.jpg", urutan=0))
     barang.foto = "source.jpg"
     db.commit()
@@ -79,8 +80,9 @@ def test_copy_job_maps_catalog_photos_settings_and_excludes_sensitive_data(clien
     assert copied_link.barang_id == copied_barang.id
     assert copied_link.supplier_id == copied_supplier.id
     assert copied_photo.barang_id == copied_barang.id
-    assert copied_photo.filename.startswith(f"{target.id}/")
-    assert (photo_dir / copied_photo.filename).read_bytes() == b"photo"
+    assert "/" not in copied_photo.filename
+    assert (photo_dir / str(target.id) / copied_photo.filename).read_bytes() == b"photo"
+    assert not (photo_dir / copied_photo.filename).exists()
     assert copied_stock.jumlah == 0
     db.refresh(target)
     assert (target.business_type, target.address, target.currency) == ("retail", "Source Road", "IDR")
