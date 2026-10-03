@@ -1,5 +1,8 @@
 import os
 from secrets import token_urlsafe
+from urllib.parse import urlsplit
+
+
 
 from dotenv import load_dotenv
 
@@ -19,6 +22,7 @@ AUDIT_TRUSTED_PROXIES = os.getenv("AUDIT_TRUSTED_PROXIES", "")
 INVITE_SMTP_HOST = os.getenv("INVITE_SMTP_HOST", "")
 INVITE_SMTP_PORT = int(os.getenv("INVITE_SMTP_PORT", "25"))
 INVITE_FROM_EMAIL = os.getenv("INVITE_FROM_EMAIL", "")
+INVITE_ACTIVATION_URL = os.getenv("INVITE_ACTIVATION_URL", "http://localhost:3000/activate").strip()
 
 
 def _validate_production_config() -> None:
@@ -45,6 +49,9 @@ def _validate_production_config() -> None:
         invalid.append("POS_INTEGRATION_KEY")
     if not os.getenv("CORS_ORIGINS") or not CORS_ORIGINS or "*" in CORS_ORIGINS:
         invalid.append("CORS_ORIGINS")
+    activation_url = urlsplit(INVITE_ACTIVATION_URL)
+    if not os.getenv("INVITE_ACTIVATION_URL") or activation_url.scheme not in {"http", "https"} or not activation_url.netloc:
+        invalid.append("INVITE_ACTIVATION_URL")
     for name in ("ADMIN_USERNAME", "ADMIN_PASSWORD"):
         if os.getenv(name):
             invalid.append(name)

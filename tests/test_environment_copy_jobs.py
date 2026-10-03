@@ -92,6 +92,35 @@ def test_copy_job_maps_catalog_photos_settings_and_excludes_sensitive_data(clien
     assert db.query(PrintJob).filter_by(environment_id=target.id).count() == 0
 
 
+def test_copy_job_copies_legacy_primary_photo_once_when_gallery_already_has_it(client, db, tmp_path, monkeypatch):
+    import app.services.environment_copy as copy_service
+
+    owner, source, target, photo_dir = _fixture(db, tmp_path)
+    legacy_only = Barang(environment_id=source.id, sku="COPY-LEGACY", nama="Legacy Only", foto="legacy.jpg")
+    gallery_same = Barang(environment_id=source.id, sku="COPY-GALLERY", nama="Gallery Same", foto="gallery.jpg")
+    db.add_all([legacy_only, gallery_same]); db.flush()
+    db.add(BarangFoto(environment_id=source.id, barang_id=gallery_same.id, filename="gallery.jpg", urutan=0))
+    (photo_dir / str(source.id) / "legacy.jpg").write_bytes(b"legacy")
+    (photo_dir / str(source.id) / "gallery.jpg").write_bytes(b"gallery")
+    db.commit()
+    monkeypatch.setattr(copy_service, "STORAGE_DIR", str(photo_dir))
+
+    response = client.post(
+        "/api/environment-copy-jobs",
+        headers=_headers(owner, "copy-legacy-photo"),
+        json={"source_environment_id": source.id, "target_environment_id": target.id},
+    )
+
+    assert response.status_code == 201, response.text
+    copied_legacy = db.query(Barang).filter_by(environment_id=target.id, sku="COPY-LEGACY").one()
+    copied_gallery = db.query(Barang).filter_by(environment_id=target.id, sku="COPY-GALLERY").one()
+    assert copied_legacy.foto
+    assert (photo_dir / str(target.id) / copied_legacy.foto).read_bytes() == b"legacy"
+    assert db.query(BarangFoto).filter_by(environment_id=target.id, barang_id=copied_legacy.id).count() == 1
+    assert db.query(BarangFoto).filter_by(environment_id=target.id, barang_id=copied_gallery.id).count() == 1
+    assert copied_gallery.foto == db.query(BarangFoto).filter_by(environment_id=target.id, barang_id=copied_gallery.id).one().filename
+
+
 def test_copy_job_inventory_opt_in_and_cancel_pending(client, db, tmp_path, monkeypatch):
     import app.services.environment_copy as copy_service
 

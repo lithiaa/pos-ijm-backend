@@ -100,15 +100,27 @@ def run_copy_job(db: Session, job: EnvironmentCopyJob) -> None:
                     ))
 
             if options["include_photos"]:
+                gallery_filenames: dict[int, set[str]] = {}
                 for photo in db.query(BarangFoto).filter_by(environment_id=source.id).order_by(BarangFoto.id):
                     if photo.barang_id not in barang_map:
                         continue
                     filename = _copy_photo(photo.filename, source.id, target.id)
                     created_files.append(filename)
+                    gallery_filenames.setdefault(photo.barang_id, set()).add(photo.filename)
                     db.add(BarangFoto(environment_id=target.id, barang_id=barang_map[photo.barang_id], filename=filename, urutan=photo.urutan))
                     copied_barang = db.get(Barang, barang_map[photo.barang_id])
                     if photo.urutan == 0:
                         copied_barang.foto = filename
+
+                for source_barang_id, target_barang_id in barang_map.items():
+                    source_barang = db.get(Barang, source_barang_id)
+                    if not source_barang.foto or source_barang.foto in gallery_filenames.get(source_barang_id, set()):
+                        continue
+                    filename = _copy_photo(source_barang.foto, source.id, target.id)
+                    created_files.append(filename)
+                    urutan = db.query(BarangFoto).filter_by(barang_id=target_barang_id).count()
+                    db.add(BarangFoto(environment_id=target.id, barang_id=target_barang_id, filename=filename, urutan=urutan))
+                    db.get(Barang, target_barang_id).foto = filename
 
         job.status = "completed"
         job.progress = 100
