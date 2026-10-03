@@ -2,13 +2,14 @@ from app.auth import create_access_token
 from app.models.barang import Barang
 from app.models.user import User
 from app.services.harga import harga_encode
+from tests.conftest import get_legacy_environment
 
 
 MANUAL_CODE = "LABEL-MANUAL-X9"
 
 
 def auth_headers(db):
-    user = User(username="test-user", password_hash="unused", nama="Test User")
+    user = User(username="test-user", password_hash="unused", nama="Test User", environment_id=get_legacy_environment(db).id)
     db.add(user)
     db.commit()
     return {"Authorization": f"Bearer {create_access_token({'sub': str(user.id)})}"}
@@ -16,6 +17,7 @@ def auth_headers(db):
 
 def test_label_uses_stored_buy_code_not_encoded_buy_price(client, db):
     barang = Barang(
+        environment_id=get_legacy_environment(db).id,
         sku="LABEL-001",
         nama="Label Item",
         harga_modal=45_000,

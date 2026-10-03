@@ -25,7 +25,9 @@ class SMTPInviter:
         message["From"] = self.from_email
         message["To"] = email
         message["Subject"] = f"Undangan {environment_name}"
-        message.set_content(f"Halo {name},\n\nToken aktivasi: {token}\n")
+        # Activation link with token, not token itself
+        activation_link = f"https://example.com/activate?token={token}"
+        message.set_content(f"Halo {name},\n\nKlik tautan berikut untuk mengaktifkan akun Anda:\n{activation_link}\n")
         with smtplib.SMTP(self.host, self.port, timeout=10) as smtp:
             smtp.send_message(message)
 

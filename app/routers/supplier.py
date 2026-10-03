@@ -19,7 +19,7 @@ def _supplier_out(supplier: Supplier, jumlah_barang: int = 0) -> SupplierOut:
 
 
 def _scoped(db: Session, supplier_id: int, env_id: int) -> Supplier | None:
-    return db.query(Supplier).filter(Supplier.id == supplier_id, ((Supplier.environment_id == env_id) | Supplier.environment_id.is_(None))).first()
+    return db.query(Supplier).filter(Supplier.id == supplier_id, Supplier.environment_id == env_id).first()
 
 
 def _commit_or_conflict(db: Session) -> None:
@@ -35,7 +35,7 @@ def _commit_or_conflict(db: Session) -> None:
 
 @router.get("", response_model=list[SupplierOut])
 def list_supplier(db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
-    suppliers = db.query(Supplier).filter((Supplier.environment_id == env_id) | Supplier.environment_id.is_(None)).all()
+    suppliers = db.query(Supplier).filter(Supplier.environment_id == env_id).all()
     return [_supplier_out(s, db.query(BarangSupplier).filter(BarangSupplier.supplier_id == s.id).count()) for s in suppliers]
 
 
@@ -57,7 +57,7 @@ def create_supplier(req: SupplierCreate, db: Session = Depends(get_db), user=Dep
     elif db.query(Supplier.id).filter(
         Supplier.id != supplier.id,
         Supplier.kode_supplier == supplier.kode_supplier,
-        ((Supplier.environment_id == env_id) | Supplier.environment_id.is_(None)),
+        Supplier.environment_id == env_id,
     ).first():
         db.rollback()
         raise HTTPException(status_code=409, detail="Kode supplier sudah digunakan")
@@ -78,7 +78,7 @@ def update_supplier(supplier_id: int, req: SupplierUpdate, db: Session = Depends
     if db.query(Supplier.id).filter(
         Supplier.id != supplier.id,
         Supplier.kode_supplier == supplier.kode_supplier,
-        ((Supplier.environment_id == env_id) | Supplier.environment_id.is_(None)),
+        Supplier.environment_id == env_id,
     ).first():
         db.rollback()
         raise HTTPException(status_code=409, detail="Kode supplier sudah digunakan")

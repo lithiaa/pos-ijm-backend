@@ -4,7 +4,7 @@ from io import BytesIO
 import pytest
 
 from app.models.barang import Barang, BarangFoto, BarangSupplier
-from tests.conftest import TEST_INTEGRATION_KEY
+from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
 
 INTEGRATION_HEADERS = {"X-Integration-Key": TEST_INTEGRATION_KEY}
 from app.models.transaksi import TransaksiStok
@@ -15,7 +15,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"gallery-test"
 
 
 def auth_client(client, db):
-    user = User(username="multi", password_hash="x", nama="Multi", role="admin")
+    user = User(username="multi", password_hash="x", nama="Multi", role="admin", environment_id=get_legacy_environment(db).id)
     db.add(user)
     db.commit()
     client.headers["Authorization"] = f"Bearer {create_access_token({'sub': str(user.id)})}"

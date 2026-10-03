@@ -1,4 +1,5 @@
 from app.models.barang import Barang
+from tests.conftest import get_legacy_environment
 
 
 BASE_URL = "/api/katalog/barang"
@@ -8,6 +9,7 @@ def add_barang(
     db, *, sku, nama, merek="Merek", harga_jual=125_000, foto=None, shopee_url=None
 ):
     barang = Barang(
+        environment_id=get_legacy_environment(db).id,
         sku=sku,
         nama=nama,
         merek=merek,

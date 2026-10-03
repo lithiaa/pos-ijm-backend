@@ -20,7 +20,7 @@ router = APIRouter()
 
 
 def _env_filter(column, env_id: int, user):
-    return column == env_id if user.role == "platform_owner" else ((column == env_id) | column.is_(None))
+    return column == env_id
 
 
 def _valid_image(content_type: str, data: bytes) -> bool:
@@ -46,7 +46,7 @@ async def _save(file: UploadFile, storage_dir: str = STORAGE_DIR) -> str:
 
 def _out(photo: BarangFoto, primary: bool) -> dict:
     return {"id": photo.id, "filename": photo.filename, "foto": photo.filename,
-            "foto_url": f"/storage/foto-barang/{photo.filename}", "urutan": photo.urutan,
+            "foto_url": f"/api/foto-barang/{photo.environment_id}/{photo.filename}", "urutan": photo.urutan,
             "is_primary": primary, "created_at": str(photo.created_at)[:19] if photo.created_at else None}
 
 

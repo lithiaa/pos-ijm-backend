@@ -17,10 +17,17 @@ SETTINGS = ("business_type", "logo_url", "address", "phone", "timezone", "curren
 
 
 def _copy_photo(source_filename: str, target_environment_id: int) -> str:
-    extension = os.path.splitext(os.path.basename(source_filename))[1]
+    if not source_filename or source_filename != os.path.basename(source_filename):
+        raise ValueError("Source filename must be a plain storage filename")
+    extension = os.path.splitext(source_filename)[1]
     target_name = f"{target_environment_id}/{uuid.uuid4()}{extension}"
     source_path = os.path.join(STORAGE_DIR, source_filename)
     target_path = os.path.join(STORAGE_DIR, target_name)
+    storage_root = os.path.realpath(STORAGE_DIR)
+    if os.path.commonpath((storage_root, os.path.realpath(source_path))) != storage_root:
+        raise ValueError("Source filename must be within storage directory")
+    if os.path.commonpath((storage_root, os.path.realpath(os.path.dirname(target_path)))) != storage_root:
+        raise ValueError("Target path traversal detected")
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     shutil.copy2(source_path, target_path)
     return target_name

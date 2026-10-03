@@ -108,7 +108,7 @@ def test_migration_creates_environments_and_adds_user_columns_idempotently():
     assert "CREATE TABLE" in sqls and "environments" in sqls
     assert "slug" in sqls and "status" in sqls
     assert "lithia-autoparts" in sqls
-    assert "role <> 'platform_owner'" in sqls or "role != 'platform_owner'" in sqls
+    assert "LOWER(role) != 'platform_owner'" in sqls
 
     # Second run should be fully idempotent
     statements_before = len(conn.statements)

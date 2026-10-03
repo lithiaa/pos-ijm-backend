@@ -15,6 +15,7 @@ def load_migration():
 class Result:
     def __init__(self, value=None): self.value = value
     def scalar(self): return self.value
+    def fetchall(self): return []
 
 
 class FakeMySQL:
@@ -45,6 +46,7 @@ def test_domain_migration_adds_and_backfills_all_tables_idempotently():
         assert f"`{table}` ADD COLUMN environment_id" in sql
         assert f"UPDATE `{table}` SET environment_id" in sql
     assert "uq_barang_env_sku" in sql and "uq_supplier_env_kode" in sql and "uq_iso_env_opid" in sql
+    assert "GROUP BY environment_id, sku" in sql
     before = len(conn.sql)
     second = migration._migrate_connection(conn)
     assert second["columns_added"] == []

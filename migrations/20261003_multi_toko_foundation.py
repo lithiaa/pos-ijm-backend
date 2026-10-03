@@ -89,7 +89,7 @@ def _migrate_connection(c) -> dict:
         text(
             "UPDATE users "
             "SET environment_id = (SELECT id FROM environments WHERE slug = 'lithia-autoparts') "
-            "WHERE environment_id IS NULL AND (role != 'platform_owner')"
+            "WHERE environment_id IS NULL AND LOWER(role) != 'platform_owner'"
         )
     )
 

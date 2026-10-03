@@ -10,7 +10,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from tests.conftest import TEST_INTEGRATION_KEY
+from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
+
+
+def legacy_environment_id(db):
+    return get_legacy_environment(db).id
 
 
 BASE_URL = "/api/integration/barang"
@@ -28,6 +32,7 @@ def add_supplier(db):
         kontak="Budi",
         telepon="021",
         email="sales@example.test",
+        environment_id=legacy_environment_id(db),
     )
     db.add(supplier)
     db.commit()
@@ -47,6 +52,7 @@ def add_barang(
     foto=None,
 ):
     barang = Barang(
+        environment_id=legacy_environment_id(db),
         sku=sku,
         nama=nama,
         merek=merek,
@@ -104,7 +110,7 @@ def test_list_serializes_full_items_and_paginates_with_total(client, db):
         "satuan": "box",
         "merek": "Akebono",
         "foto": "part.webp",
-        "foto_url": "/storage/foto-barang/part.webp",
+        "foto_url": f"/api/foto-barang/{beta.id}/part.webp",
         "supplier": {
             "id": supplier.id,
             "nama": "Maju Jaya",
@@ -173,8 +179,8 @@ def test_list_is_case_insensitive_deterministic_and_validates_params(client, db)
 def test_meta_is_authenticated_sorted_distinct_and_has_pcs_fallback(client, db):
     db.add_all(
         [
-            Supplier(nama="zulu"),
-            Supplier(nama="Beta"),
+            Supplier(nama="zulu", environment_id=legacy_environment_id(db)),
+            Supplier(nama="Beta", environment_id=legacy_environment_id(db)),
         ]
     )
     db.commit()
@@ -211,7 +217,7 @@ def test_detail_returns_full_item_and_missing_404(client, db):
     assert response.json()["id"] == barang.id
     assert response.json()["stok_status"] == "aman"
     assert response.json()["foto"] == "detail.png"
-    assert response.json()["foto_url"] == "/storage/foto-barang/detail.png"
+    assert response.json()["foto_url"] == f"/api/foto-barang/{barang.id}/detail.png"
     assert client.get(f"{BASE_URL}/9999", headers=AUTH_HEADERS).status_code == 404
     assert client.get(f"{BASE_URL}/0", headers=AUTH_HEADERS).status_code == 422
     assert client.get(f"{BASE_URL}/-1", headers=AUTH_HEADERS).status_code == 422
@@ -536,6 +542,7 @@ def test_delete_photo_supports_jwt_and_clears_database_and_file(
         password_hash="unused",
         nama="Photo Delete User",
         role="karyawan",
+        environment_id=legacy_environment_id(db),
     )
     db.add(user)
     db.commit()
@@ -692,7 +699,7 @@ def test_upload_streams_uses_safe_server_extension_and_returns_full_item(
     filename = response.json()["foto"]
     assert filename.endswith(expected_ext)
     assert "/" not in filename and "\\" not in filename
-    assert response.json()["foto_url"] == f"/storage/foto-barang/{filename}"
+    assert response.json()["foto_url"] == f"/api/foto-barang/{barang.id}/{filename}"
     assert (tmp_path / filename).read_bytes() == IMAGE_BYTES[content_type]
 
 

@@ -80,7 +80,7 @@ def list_logs(
     current_user=Depends(require_admin),
     env_id: int = Depends(get_current_user_env_id),
 ):
-    query = db.query(AuditLog).filter((AuditLog.environment_id == env_id) | AuditLog.environment_id.is_(None))
+    query = db.query(AuditLog).filter(AuditLog.environment_id == env_id)
     term = (q or "").strip()
     if term:
         contains = f"%{term}%"

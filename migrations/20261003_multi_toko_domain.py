@@ -47,6 +47,10 @@ def _migrate_connection(c):
     # Legacy global unique keys need manual index-name discovery in deployment; add scoped indexes safely.
     for table, columns, name in (("barang", "environment_id, sku", "uq_barang_env_sku"), ("supplier", "environment_id, kode_supplier", "uq_supplier_env_kode"), ("integration_stock_operations", "environment_id, operation_id", "uq_iso_env_opid")):
         if not _index_exists(c, schema, table, name):
+            # Check for duplicates before creating unique index
+            dup_check = c.execute(text(f"SELECT COUNT(*) FROM `{table}` GROUP BY {columns} HAVING COUNT(*) > 1")).fetchall()
+            if dup_check:
+                raise RuntimeError(f"Cannot create unique index {name} on {table}: duplicates exist")
             c.execute(text(f"ALTER TABLE `{table}` ADD UNIQUE INDEX `{name}` ({columns})"))
     return {"columns_added": added, "environment_id": env}
 

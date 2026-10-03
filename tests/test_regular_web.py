@@ -9,11 +9,12 @@ from app.models.printjob import PrintJob
 from app.models.supplier import Supplier
 from app.models.transaksi import IntegrationStockOperation, StokSaatIni, TransaksiStok
 from app.models.user import User
+from tests.conftest import get_legacy_environment
 
 
 @pytest.fixture
 def auth(client, db):
-    user = User(username="web-qa", password_hash="unused", nama="QA", role="admin")
+    user = User(username="web-qa", password_hash="unused", nama="QA", role="admin", environment_id=get_legacy_environment(db).id)
     db.add(user)
     db.commit()
     client.headers["Authorization"] = f"Bearer {create_access_token({'sub': str(user.id)})}"

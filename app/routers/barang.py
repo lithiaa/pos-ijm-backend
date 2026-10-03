@@ -119,7 +119,7 @@ def list_barang(
     order_col = sortable.get(sort_by, Barang.id)
     order = order_col.asc() if str(sort_order).upper() != "DESC" else order_col.desc()
     stock = func.coalesce(StokSaatIni.jumlah, 0)
-    query = db.query(Barang).filter((Barang.environment_id == env_id) | Barang.environment_id.is_(None)).outerjoin(StokSaatIni)
+    query = db.query(Barang).filter(Barang.environment_id == env_id).outerjoin(StokSaatIni)
 
     term = (q or search or "").strip()
     if term:

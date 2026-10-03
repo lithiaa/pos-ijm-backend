@@ -9,7 +9,7 @@ from app.models.barang import Barang
 from app.models.supplier import Supplier
 from app.models.user import User
 from app.services.harga import harga_encode
-from tests.conftest import TEST_INTEGRATION_KEY
+from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
 
 
 INTEGRATION_URL = "/api/integration/suppliers"
@@ -18,14 +18,14 @@ SUPPLIER_URL = "/api/supplier"
 
 
 def bearer_headers(db):
-    user = User(username="supplier-test", password_hash="unused", nama="Supplier Test")
+    user = User(username="supplier-test", password_hash="unused", nama="Supplier Test", environment_id=get_legacy_environment(db).id)
     db.add(user)
     db.commit()
     return {"Authorization": f"Bearer {create_access_token({'sub': str(user.id)})}"}
 
 
 def add_supplier(db, *, kode_supplier="SUP-001", nama="Supplier One", **fields):
-    supplier = Supplier(kode_supplier=kode_supplier, nama=nama, **fields)
+    supplier = Supplier(kode_supplier=kode_supplier, nama=nama, environment_id=get_legacy_environment(db).id, **fields)
     db.add(supplier)
     db.commit()
     db.refresh(supplier)
@@ -329,6 +329,7 @@ def test_barang_list_serializes_supplier_code_name_and_old_fields(
         email="route@example.test",
     )
     barang = Barang(
+        environment_id=get_legacy_environment(db).id,
         sku=f"ROUTE-{supplier.id}",
         nama="Route Item",
         supplier_id=supplier.id,

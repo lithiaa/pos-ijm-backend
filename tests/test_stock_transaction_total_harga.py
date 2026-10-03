@@ -5,6 +5,7 @@ from app.auth import create_access_token
 from app.models.barang import Barang
 from app.models.transaksi import StokSaatIni, TransaksiStok
 from app.models.user import User
+from tests.conftest import get_legacy_environment
 
 
 LARGE_STOCK = 485_000
@@ -14,8 +15,9 @@ TOTAL_PRICE = 235_222_090_000
 
 
 def test_stock_out_persists_total_above_mysql_int_limit(client, db):
-    user = User(username="stock-total-qa", password_hash="unused", nama="QA")
-    barang = Barang(sku="LABEL-308", nama="Lithia Label Printer")
+    environment_id = get_legacy_environment(db).id
+    user = User(username="stock-total-qa", password_hash="unused", nama="QA", environment_id=environment_id)
+    barang = Barang(sku="LABEL-308", nama="Lithia Label Printer", environment_id=environment_id)
     db.add_all([user, barang])
     db.flush()
     db.add(StokSaatIni(barang_id=barang.id, jumlah=LARGE_STOCK))

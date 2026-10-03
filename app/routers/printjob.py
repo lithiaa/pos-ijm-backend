@@ -32,7 +32,9 @@ def create_job(req: JobCreate, db: Session = Depends(get_db), user=Depends(get_c
 
 @router.get("/")
 def list_jobs(status: Optional[str] = None, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
-    q = db.query(PrintJob, Barang).join(Barang, PrintJob.barang_id == Barang.id).filter(PrintJob.environment_id == env_id)
+    q = db.query(PrintJob, Barang).join(Barang, PrintJob.barang_id == Barang.id).filter(
+        PrintJob.environment_id == env_id, Barang.environment_id == env_id
+    )
     if status: q = q.filter(PrintJob.status == status)
     return [{"id": pj.id, "barang_id": pj.barang_id, "qty": pj.qty, "status": pj.status, "error": pj.error, "created_at": pj.created_at.isoformat() if pj.created_at else None, "printed_at": pj.printed_at.isoformat() if pj.printed_at else None, "barang": {"nama": b.nama, "sku": b.sku, "harga_jual": b.harga_jual, "harga_modal": b.harga_modal}} for pj, b in q.order_by(PrintJob.id.asc()).all()]
 

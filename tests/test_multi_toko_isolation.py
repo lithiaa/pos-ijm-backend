@@ -200,11 +200,13 @@ class TestLogsIsolation:
         db.add_all([
             AuditLog(user_id=user_a.id, username="admin-a", action="CREATE", http_method="POST", resource="barang", path="/api/barang", status_code=200, summary="{}", environment_id=env_a.id),
             AuditLog(user_id=user_b.id, username="admin-b", action="CREATE", http_method="POST", resource="barang", path="/api/barang", status_code=200, summary="{}", environment_id=env_b.id),
+            AuditLog(user_id=None, username="legacy", action="CREATE", http_method="POST", resource="barang", path="/api/barang", status_code=200, summary="{}", environment_id=None),
         ])
         db.commit()
         resp = client.get("/api/logs", headers=_auth(user_a))
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
+        assert [row["username"] for row in resp.json()["data"]] == ["admin-a"]
 
 
 class TestPhotoIsolation:

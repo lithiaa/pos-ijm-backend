@@ -63,10 +63,45 @@ from app.routers.laporan import router as laporan_router
 app.include_router(laporan_router)
 
 import os
+from fastapi import Depends, HTTPException
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.auth import get_current_user, get_current_user_env_id
+from app.models.barang import Barang, BarangFoto
 from app.routers.upload import STORAGE_DIR as FOTO_STORAGE_DIR
 
-# Mount static files
-app.mount('/storage/foto-barang', StaticFiles(directory=FOTO_STORAGE_DIR), name='foto-barang')
+
+@app.get("/api/foto-barang/{environment_id}/{filename}")
+def serve_foto_barang(
+    environment_id: int,
+    filename: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    env_id: int = Depends(get_current_user_env_id),
+):
+    if env_id != environment_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this environment's photos")
+    if filename != os.path.basename(filename):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    owned = (
+        db.query(BarangFoto.id)
+        .filter(BarangFoto.environment_id == environment_id, BarangFoto.filename == filename)
+        .first()
+        or db.query(Barang.id)
+        .filter(Barang.environment_id == environment_id, Barang.foto == filename)
+        .first()
+    )
+    if not owned:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    paths = (
+        os.path.join(FOTO_STORAGE_DIR, str(environment_id), filename),
+        os.path.join(FOTO_STORAGE_DIR, filename),
+    )
+    filepath = next((path for path in paths if os.path.isfile(path)), None)
+    if filepath is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FileResponse(filepath)
 
 
 

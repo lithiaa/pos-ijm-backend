@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/stok", tags=["stok"])
 
 @router.post("/masuk")
 def stok_masuk(req: StokMasukRequest, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
-    barang = db.query(Barang).filter(Barang.id == req.barang_id, ((Barang.environment_id == env_id) | Barang.environment_id.is_(None))).first()
+    barang = db.query(Barang).filter(Barang.id == req.barang_id, Barang.environment_id == env_id).first()
     if not barang:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
     if req.supplier_id is not None and not db.query(Supplier).filter(Supplier.id == req.supplier_id, Supplier.environment_id == env_id).first():
@@ -27,7 +27,7 @@ def stok_masuk(req: StokMasukRequest, db: Session = Depends(get_db), user=Depend
 
 @router.post("/keluar")
 def stok_keluar(req: StokKeluarRequest, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
-    barang = db.query(Barang).filter(Barang.id == req.barang_id, ((Barang.environment_id == env_id) | Barang.environment_id.is_(None))).first()
+    barang = db.query(Barang).filter(Barang.id == req.barang_id, Barang.environment_id == env_id).first()
     if not barang:
         raise HTTPException(status_code=404, detail="Barang tidak ditemukan")
     stok = db.query(StokSaatIni).filter(StokSaatIni.barang_id == req.barang_id).first()

@@ -3,7 +3,7 @@ import pytest
 from app.models.barang import Barang
 from app.models.transaksi import StokSaatIni
 from app.models.user import User
-from tests.conftest import TEST_INTEGRATION_KEY
+from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
 
 
 URL = "/api/integration/barang/statistik"
@@ -21,6 +21,7 @@ def add_barang(
     foto=None,
 ):
     barang = Barang(
+        environment_id=get_legacy_environment(db).id,
         sku=sku,
         nama=nama,
         harga_modal=111_000,
@@ -45,6 +46,7 @@ def login_headers(client, db, monkeypatch, *, role):
         password_hash="unused",
         nama="Statistics User",
         role=role,
+        environment_id=get_legacy_environment(db).id,
     )
     db.add(user)
     db.commit()

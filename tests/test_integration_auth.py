@@ -8,7 +8,7 @@ from app.models.barang import Barang
 from app.models.transaksi import StokSaatIni
 from app.models.user import User
 from config import ALGORITHM, SECRET_KEY
-from tests.conftest import TEST_INTEGRATION_KEY
+from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
 
 BARANG_URL = "/api/integration/barang"
 SUPPLIER_URL = "/api/integration/suppliers"
@@ -21,6 +21,7 @@ def login_headers(client, db, monkeypatch, *, username, role="karyawan"):
         password_hash="unused",
         nama="Integration User",
         role=role,
+        environment_id=get_legacy_environment(db).id,
     )
     db.add(user)
     db.commit()
@@ -50,7 +51,7 @@ def test_integration_reads_accept_login_jwt(client, db, monkeypatch, url, role):
         db,
         monkeypatch,
         username=f"{role}-{url.rsplit('/', 1)[-1]}",
-        role=role,
+        role=role
     )
 
     response = client.get(url, headers=headers)
@@ -150,7 +151,7 @@ def test_integration_jwt_populates_audit_actor(client, db, monkeypatch):
         username="integration-auditor",
         role="admin",
     )
-    barang = Barang(sku="JWT-AUDIT", nama="Before", harga_jual=100)
+    barang = Barang(sku="JWT-AUDIT", nama="Before", harga_jual=100, environment_id=get_legacy_environment(db).id)
     db.add(barang)
     db.flush()
     db.add(StokSaatIni(barang_id=barang.id, jumlah=1))

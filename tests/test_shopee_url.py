@@ -2,11 +2,12 @@ import pytest
 
 from app.auth import create_access_token
 from app.models.user import User
+from tests.conftest import get_legacy_environment
 
 
 @pytest.fixture
 def auth(client, db):
-    user = User(username="shopee-qa", password_hash="unused", nama="QA", role="admin")
+    user = User(username="shopee-qa", password_hash="unused", nama="QA", role="admin", environment_id=get_legacy_environment(db).id)
     db.add(user)
     db.commit()
     client.headers["Authorization"] = f"Bearer {create_access_token({'sub': str(user.id)})}"

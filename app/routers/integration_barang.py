@@ -2,7 +2,7 @@ import os
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
-from app.integration_auth import get_integration_env_id
+from app.integration_auth import current_integration_env_id, get_integration_env_id
 from sqlalchemy import case, func, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -75,22 +75,37 @@ FULL_ITEM_OPTIONS = (
 )
 
 
-def _get_by_sku(db: Session, sku: str) -> Barang | None:
+def _get_by_sku(db: Session, sku: str, env_id: int) -> Barang | None:
     return (
         db.query(Barang)
         .options(*FULL_ITEM_OPTIONS)
-        .filter(Barang.sku == sku)
+        .filter(Barang.sku == sku, Barang.environment_id == env_id)
         .first()
     )
 
 
-def _get_by_id(db: Session, barang_id: int) -> Barang | None:
+def _get_by_id(db: Session, barang_id: int, env_id: int) -> Barang | None:
     return (
         db.query(Barang)
         .options(*FULL_ITEM_OPTIONS)
-        .filter(Barang.id == barang_id)
+        .filter(Barang.id == barang_id, Barang.environment_id == env_id)
         .first()
     )
+
+
+def _integration_env_id(request: Request | None = None) -> int:
+    env_id = get_integration_env_id(request) if request is not None else current_integration_env_id()
+    if env_id is None:
+        raise HTTPException(status_code=401, detail="Integration environment required")
+    return env_id
+
+
+def _get_by_sku_for_integration(db: Session, sku: str, request: Request | None = None) -> Barang | None:
+    return _get_by_sku(db, sku, _integration_env_id(request))
+
+
+def _get_by_id_for_integration(db: Session, barang_id: int, request: Request | None = None) -> Barang | None:
+    return _get_by_id(db, barang_id, _integration_env_id(request))
 
 
 def _stock_status(stok: int, stok_minimum: int) -> str:
@@ -114,7 +129,7 @@ def _to_integration_out(barang: Barang) -> IntegrationBarangOut:
         satuan=barang.satuan or "pcs",
         merek=barang.merek,
         foto=barang.foto,
-        foto_url=f"/storage/foto-barang/{barang.foto}" if barang.foto else None,
+        foto_url=f"/api/foto-barang/{barang.environment_id}/{barang.foto}" if barang.foto else None,
         supplier=(
             IntegrationSupplierOut(
                 id=barang.supplier.id,
@@ -151,8 +166,12 @@ def _get_operation_barang(
     db: Session,
     operation_id: str,
     expected_sku: str,
+    env_id: int,
 ) -> Barang | None:
-    operation = db.get(IntegrationStockOperation, operation_id)
+    operation = db.query(IntegrationStockOperation).filter(
+        IntegrationStockOperation.operation_id == operation_id,
+        IntegrationStockOperation.environment_id == env_id,
+    ).first()
     if not operation:
         return None
 
@@ -246,8 +265,11 @@ def list_integration_barang(
 
 
 @router.get("/meta", response_model=IntegrationBarangMetaOut)
-def get_integration_barang_meta(db: Session = Depends(get_db)):
-    suppliers = db.query(Supplier).order_by(func.lower(Supplier.nama), Supplier.id).all()
+def get_integration_barang_meta(request: Request, db: Session = Depends(get_db)):
+    query = db.query(Supplier)
+    if (env_id := get_integration_env_id(request)) is not None:
+        query = query.filter(Supplier.environment_id == env_id)
+    suppliers = query.order_by(func.lower(Supplier.nama), Supplier.id).all()
     values = {
         value.strip()
         for (value,) in db.query(Barang.satuan).distinct().all()
@@ -273,6 +295,7 @@ def get_integration_barang_meta(db: Session = Depends(get_db)):
 
 @router.get("/search", response_model=IntegrationBarangSearchResponse)
 def search_integration_barang(
+    request: Request,
     q: str | None = None,
     limit: int = Query(default=10, ge=1, le=20),
     db: Session = Depends(get_db),
@@ -295,6 +318,7 @@ def search_integration_barang(
     barang = (
         db.query(Barang)
         .options(joinedload(Barang.stok))
+        .filter(Barang.environment_id == _integration_env_id(request))
         .filter(
             or_(
                 lower_name.like(contains, escape="\\"),
@@ -311,11 +335,12 @@ def search_integration_barang(
 
 
 @router.get("/statistik", response_model=IntegrationBarangStatistikResponse)
-def get_integration_barang_statistik(db: Session = Depends(get_db)):
+def get_integration_barang_statistik(request: Request, db: Session = Depends(get_db)):
     stock = func.coalesce(StokSaatIni.jumlah, 0)
     rows = (
         db.query(Barang, stock.label("stok"))
         .outerjoin(StokSaatIni)
+        .filter(Barang.environment_id == _integration_env_id(request))
         .order_by(stock, func.lower(Barang.nama), Barang.id)
         .all()
     )
@@ -349,8 +374,8 @@ def get_integration_barang_statistik(db: Session = Depends(get_db)):
 
 
 @router.get("/by-sku/{sku}", response_model=IntegrationBarangOut)
-def get_barang_by_sku(sku: str, db: Session = Depends(get_db)):
-    barang = _get_by_sku(db, _normalize_sku(sku))
+def get_barang_by_sku(sku: str, db: Session = Depends(get_db), request: Request = None):
+    barang = _get_by_sku_for_integration(db, _normalize_sku(sku), request)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
     return _to_integration_out(barang)
@@ -364,17 +389,19 @@ def get_barang_by_sku(sku: str, db: Session = Depends(get_db)):
 def create_integration_barang(
     req: IntegrationBarangCreate,
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
     operation_id = str(req.operation_id)
-    previous_barang = _get_operation_barang(db, operation_id, req.sku)
+    previous_barang = _get_operation_barang(db, operation_id, req.sku, _integration_env_id(request))
     if previous_barang:
         return _to_integration_out(previous_barang)
 
-    if _get_by_sku(db, req.sku):
+    if _get_by_sku_for_integration(db, req.sku, request):
         raise HTTPException(status_code=409, detail="SKU already exists")
     _validate_supplier_id(db, req.supplier_id)
 
     barang = Barang(
+        environment_id=_integration_env_id(request),
         sku=req.sku,
         nama=req.nama,
         merek=req.merek,
@@ -390,16 +417,17 @@ def create_integration_barang(
     try:
         db.add(barang)
         db.flush()
-        db.add(StokSaatIni(barang_id=barang.id, jumlah=0))
+        db.add(StokSaatIni(environment_id=_integration_env_id(request), barang_id=barang.id, jumlah=0))
         db.flush()
         if req.jumlah_barang_masuk:
             record_stock_in(db, barang_id=barang.id, jumlah=req.jumlah_barang_masuk,
                 harga_satuan=req.harga_beli, keterangan=_keterangan(operation_id),
                 user_id=None, supplier_id=req.supplier_id)
         elif req.supplier_id is not None:
-            db.add(BarangSupplier(barang_id=barang.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
+            db.add(BarangSupplier(environment_id=_integration_env_id(request), barang_id=barang.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
         db.add(
             IntegrationStockOperation(
+                environment_id=_integration_env_id(request),
                 operation_id=operation_id,
                 barang_id=barang.id,
             )
@@ -407,7 +435,7 @@ def create_integration_barang(
         db.commit()
     except IntegrityError:
         db.rollback()
-        previous_barang = _get_operation_barang(db, operation_id, req.sku)
+        previous_barang = _get_operation_barang(db, operation_id, req.sku, _integration_env_id(request))
         if previous_barang:
             return _to_integration_out(previous_barang)
         raise HTTPException(status_code=409, detail="SKU already exists")
@@ -427,14 +455,15 @@ def add_integration_stock(
     sku: str,
     req: IntegrationStokMasuk,
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
     normalized_sku = _normalize_sku(sku)
-    barang = _get_by_sku(db, normalized_sku)
+    barang = _get_by_sku_for_integration(db, normalized_sku, request)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
 
     operation_id = str(req.operation_id)
-    previous_barang = _get_operation_barang(db, operation_id, normalized_sku)
+    previous_barang = _get_operation_barang(db, operation_id, normalized_sku, _integration_env_id(request))
     if previous_barang:
         return _to_integration_out(previous_barang)
 
@@ -447,6 +476,7 @@ def add_integration_stock(
         )
         db.add(
             IntegrationStockOperation(
+                environment_id=_integration_env_id(request),
                 operation_id=operation_id,
                 barang_id=barang.id,
             )
@@ -454,7 +484,7 @@ def add_integration_stock(
         db.commit()
     except IntegrityError:
         db.rollback()
-        previous_barang = _get_operation_barang(db, operation_id, normalized_sku)
+        previous_barang = _get_operation_barang(db, operation_id, normalized_sku, _integration_env_id(request))
         if previous_barang:
             return _to_integration_out(previous_barang)
         raise
@@ -463,7 +493,7 @@ def add_integration_stock(
         raise
 
     db.expire_all()
-    barang = _get_by_sku(db, normalized_sku)
+    barang = _get_by_sku_for_integration(db, normalized_sku, request)
     return _to_integration_out(barang)
 
 
@@ -471,8 +501,9 @@ def add_integration_stock(
 def get_integration_barang(
     barang_id: int = Path(ge=1),
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
-    barang = _get_by_id(db, barang_id)
+    barang = _get_by_id_for_integration(db, barang_id, request)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
     return _to_integration_out(barang)
@@ -483,8 +514,9 @@ def update_integration_barang_by_id(
     req: IntegrationBarangMetadataUpdate,
     barang_id: int = Path(ge=1),
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
-    barang = _get_by_id(db, barang_id)
+    barang = _get_by_id_for_integration(db, barang_id, request)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
 
@@ -506,7 +538,7 @@ def update_integration_barang_by_id(
         setattr(barang, field_map.get(field, field), getattr(req, field))
     if "supplier_id" in supplied and req.supplier_id is not None:
         if not db.get(BarangSupplier, (barang.id, req.supplier_id)):
-            db.add(BarangSupplier(barang_id=barang.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
+            db.add(BarangSupplier(environment_id=_integration_env_id(request), barang_id=barang.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))
         winner = db.query(BarangSupplier).filter(
             BarangSupplier.barang_id == barang.id, BarangSupplier.jumlah_masuk_kumulatif > 0
         ).order_by(BarangSupplier.jumlah_masuk_kumulatif.desc(), BarangSupplier.supplier_id).first()
@@ -522,7 +554,7 @@ def update_integration_barang_by_id(
         db.rollback()
         raise
 
-    return _to_integration_out(_get_by_id(db, barang.id))
+    return _to_integration_out(_get_by_id_for_integration(db, barang.id, request))
 
 
 @router.post("/{barang_id}/foto", response_model=IntegrationBarangOut)
@@ -530,10 +562,11 @@ async def upload_integration_barang_photo(
     file: UploadFile = File(...),
     barang_id: int = Path(ge=1),
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
-    if not _get_by_id(db, barang_id):
+    if not _get_by_id_for_integration(db, barang_id, request):
         raise HTTPException(status_code=404, detail="Barang not found")
-    barang = _get_by_id(db, barang_id)
+    barang = _get_by_id_for_integration(db, barang_id, request)
     filename = await _save(file, STORAGE_DIR)
     old_photo = barang.foto
     try:
@@ -548,15 +581,16 @@ async def upload_integration_barang_photo(
         raise
     if old_photo and old_photo != filename:
         remove_unreferenced_file(db, old_photo, STORAGE_DIR)
-    return _to_integration_out(_get_by_id(db, barang_id))
+    return _to_integration_out(_get_by_id_for_integration(db, barang_id, request))
 
 
 @router.delete("/{barang_id}/foto", status_code=status.HTTP_204_NO_CONTENT)
 def delete_integration_barang_photo(
     barang_id: int = Path(ge=1),
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
-    barang = _get_by_id(db, barang_id)
+    barang = _get_by_id_for_integration(db, barang_id, request)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
     old_photo = barang.foto
@@ -577,6 +611,7 @@ def delete_integration_barang_photo(
 def delete_integration_barang(
     barang_id: int = Path(ge=1),
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
     barang = _locked_barang(db, barang_id)
     if not barang:
@@ -625,8 +660,9 @@ def update_integration_barang(
     sku: str,
     req: IntegrationBarangUpdate,
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
-    barang = _get_by_sku(db, _normalize_sku(sku))
+    barang = _get_by_sku_for_integration(db, _normalize_sku(sku), request)
     if not barang:
         raise HTTPException(status_code=404, detail="Barang not found")
 

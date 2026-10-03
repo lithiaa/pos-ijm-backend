@@ -134,6 +134,8 @@ def update_user(
     if payload.name is not None:
         user.nama = payload.name
     if payload.role is not None:
+        if payload.role == "platform_owner":
+            raise HTTPException(status_code=403, detail="Administrator cannot assign platform_owner role")
         user.role = payload.role
     if payload.permissions is not None:
         user.permissions = json.dumps(payload.permissions)

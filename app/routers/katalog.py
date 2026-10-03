@@ -17,8 +17,10 @@ LITHIA_SLUG = "lithia-autoparts"
 
 def _catalog_query(db: Session):
     env = db.query(Environment).filter(Environment.slug == LITHIA_SLUG).first()
-    # Legacy test/dev rows predate migration; production migration backfills them.
-    return db.query(Barang).filter((Barang.environment_id == env.id) | Barang.environment_id.is_(None)) if env else db.query(Barang).filter(Barang.environment_id.is_(None))
+    if not env:
+        # No Lithia Autoparts environment configured - return empty query
+        return db.query(Barang).filter(False)
+    return db.query(Barang).filter(Barang.environment_id == env.id)
 
 
 def _slug(barang: Barang) -> str:

@@ -17,7 +17,7 @@ from app.models.audit_log import AuditLog
 from app.models.barang import Barang
 from app.models.transaksi import StokSaatIni
 from app.models.user import User
-from tests.conftest import TEST_INTEGRATION_KEY
+from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
 
 
 def authenticate(client, db, username="audit-user", role="admin"):
@@ -26,6 +26,7 @@ def authenticate(client, db, username="audit-user", role="admin"):
         password_hash="unused",
         nama="Audit User",
         role=role,
+        environment_id=get_legacy_environment(db).id,
     )
     db.add(user)
     db.commit()
@@ -174,7 +175,7 @@ def test_forwarded_ip_is_accepted_only_from_loopback_or_an_explicit_trusted_prox
 
 
 def test_integration_mutation_uses_integration_actor_and_path_object_id(client, db):
-    barang = Barang(sku="INTEGRATION-AUDIT", nama="Before", harga_jual=100)
+    barang = Barang(sku="INTEGRATION-AUDIT", nama="Before", harga_jual=100, environment_id=get_legacy_environment(db).id)
     db.add(barang)
     db.flush()
     db.add(StokSaatIni(barang_id=barang.id, jumlah=1))
@@ -252,7 +253,7 @@ def test_multipart_audit_stores_metadata_not_file_bytes(
     client, db, tmp_path, monkeypatch
 ):
     monkeypatch.setattr("app.routers.upload.STORAGE_DIR", str(tmp_path))
-    barang = Barang(sku="UPLOAD-AUDIT", nama="Upload")
+    barang = Barang(sku="UPLOAD-AUDIT", nama="Upload", environment_id=get_legacy_environment(db).id)
     db.add(barang)
     db.commit()
     authenticate(client, db)

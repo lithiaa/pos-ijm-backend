@@ -6,7 +6,7 @@ from app.models.transaksi import (
     StokSaatIni,
     TransaksiStok,
 )
-from tests.conftest import TEST_INTEGRATION_KEY
+from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
 
 
 BASE_URL = "/api/integration/barang"
@@ -58,6 +58,7 @@ def add_barang(
     stok=7,
     satuan="box",
 ):
+    env = get_legacy_environment(db)
     barang = Barang(
         sku=sku,
         nama=nama,
@@ -65,6 +66,7 @@ def add_barang(
         harga_beli_kode=harga_beli_kode,
         harga_jual=harga_jual,
         satuan=satuan,
+        environment_id=env.id,
     )
     db.add(barang)
     db.flush()

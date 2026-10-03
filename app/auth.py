@@ -247,13 +247,8 @@ def get_current_user_env_id(
             "summary": {"support_grant_id": grant.id, "environment_id": grant.environment_id},
         }
         return grant.environment_id
-    legacy = db.query(Environment).filter(Environment.slug == "lithia-autoparts").first()
-    if legacy is None:
-        legacy = Environment(slug="lithia-autoparts", name="Lithia Autoparts", status="active")
-        db.add(legacy)
-        db.commit()
-        db.refresh(legacy)
-    return legacy.id
+    # Non-platform owner without environment_id is an error - they must be assigned to an environment
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not assigned to an environment")
 
 
 def require_permission(permission: str):
