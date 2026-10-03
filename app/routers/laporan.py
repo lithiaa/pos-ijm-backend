@@ -6,9 +6,9 @@ from datetime import date, timedelta
 from app.database import get_db
 from app.models.barang import Barang
 from app.models.transaksi import TransaksiStok
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
 
-router = APIRouter(prefix="/api/laporan", tags=["laporan"])
+router = APIRouter(prefix="/api/laporan", tags=["laporan"], dependencies=[Depends(require_tenant_permission("stok"))])
 
 
 @router.get("/laba")

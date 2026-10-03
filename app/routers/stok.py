@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
 from app.database import get_db
 from app.models.barang import Barang
 from app.models.supplier import Supplier
@@ -9,7 +9,7 @@ from app.models.transaksi import StokSaatIni, TransaksiStok
 from app.schemas.stok import StokMasukRequest, StokKeluarRequest, TransaksiOut, TransaksiListResponse
 from app.services.stock_in import record_stock_in
 
-router = APIRouter(prefix="/api/stok", tags=["stok"])
+router = APIRouter(prefix="/api/stok", tags=["stok"], dependencies=[Depends(require_tenant_permission("stok"))])
 
 
 @router.post("/masuk")

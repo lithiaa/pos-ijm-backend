@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthPrincipal, get_current_principal, hash_password
 from app.database import get_db
-from app.invites import Inviter, get_inviter
+from app.invites import Inviter, get_inviter, require_invite_delivery
 from app.models.admin import Invitation
 from app.models.user import User
 from app.schemas.users import UserCreate, UserUpdate
@@ -75,6 +75,7 @@ def create_user(
     inviter: Inviter = Depends(get_inviter),
 ):
     environment_id = _admin(principal)
+    require_invite_delivery(inviter)
     if db.query(User.id).filter(User.email == payload.email).first():
         raise HTTPException(status_code=409, detail="Email already used")
     if db.query(User.id).filter(User.username == payload.username).first():
@@ -169,6 +170,7 @@ def reset_password(
     user = _scoped_user(db, user_id, _admin(principal))
     if user.role == "admin":
         raise HTTPException(status_code=403, detail="Administrator cannot be reset here")
+    require_invite_delivery(inviter)
     db.query(Invitation).filter(Invitation.user_id == user.id, Invitation.accepted_at.is_(None)).update(
         {Invitation.revoked_at: datetime.now(timezone.utc).replace(tzinfo=None)}
     )

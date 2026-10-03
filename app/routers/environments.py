@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthPrincipal, get_current_principal
 from app.database import get_db
-from app.invites import Inviter, get_inviter
+from app.invites import Inviter, get_inviter, require_invite_delivery
 from app.models.admin import Invitation, ProvisionRequest, SupportGrant
 from app.models.environment import Environment
 from app.models.user import User
@@ -77,6 +77,7 @@ def create_environment(
     inviter: Inviter = Depends(get_inviter),
 ):
     _require_owner(principal)
+    require_invite_delivery(inviter)
     canonical = json.dumps(payload.model_dump(), sort_keys=True, separators=(",", ":"))
     request_hash = hashlib.sha256(canonical.encode()).hexdigest()
     existing = db.query(ProvisionRequest).filter_by(request_key=idempotency_key).first()

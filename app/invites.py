@@ -3,7 +3,16 @@ from email.message import EmailMessage
 from typing import Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from config import INVITE_ACTIVATION_URL, INVITE_FROM_EMAIL, INVITE_SMTP_HOST, INVITE_SMTP_PORT
+from fastapi import HTTPException, status
+
+from config import APP_ENV, INVITE_ACTIVATION_URL, INVITE_FROM_EMAIL, INVITE_SMTP_HOST, INVITE_SMTP_PORT
+
+
+def require_invite_delivery(inviter: "Inviter") -> None:
+    if APP_ENV == "production" and isinstance(inviter, NoOpInviter):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Invite delivery is not configured")
+
+
 
 
 def _activation_link(token: str) -> str:

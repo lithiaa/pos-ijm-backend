@@ -266,3 +266,15 @@ def require_permission(permission: str):
         return principal
 
     return dependency
+
+
+def require_tenant_permission(resource: str):
+    """Apply declared CRUD permission consistently to a tenant router."""
+    def dependency(request: Request, principal: AuthPrincipal = Depends(get_current_principal)) -> AuthPrincipal:
+        action = "read" if request.method in {"GET", "HEAD", "OPTIONS"} else "delete" if request.method == "DELETE" else "write"
+        permission = f"{resource}.{action}"
+        if not principal.has_permission(permission):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' required")
+        return principal
+
+    return dependency

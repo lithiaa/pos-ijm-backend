@@ -15,11 +15,11 @@ from app.models.transaksi import (
 )
 from app.schemas.barang import BarangCreate, BarangUpdate, BarangOut, BarangListResponse, BarangSupplierOut, BarangPhotoOut
 from app.schemas.supplier import SupplierOut
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
 from app.services.harga import harga_encode, harga_decode
 from app.routers.upload import STORAGE_DIR, _locked_barang, remove_unreferenced_file
 
-router = APIRouter(prefix="/api/barang", tags=["barang"])
+router = APIRouter(prefix="/api/barang", tags=["barang"], dependencies=[Depends(require_tenant_permission("barang"))])
 
 
 def _validate_supplier_id(db: Session, req: BarangCreate | BarangUpdate, env_id: int) -> None:

@@ -5,12 +5,12 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
 from app.database import get_db
 from app.models.barang import Barang
 from app.models.printjob import PrintJob
 
-router = APIRouter(prefix="/api/print-jobs", tags=["print-jobs"])
+router = APIRouter(prefix="/api/print-jobs", tags=["print-jobs"], dependencies=[Depends(require_tenant_permission("barang"))])
 
 class JobCreate(BaseModel):
     barang_id: int

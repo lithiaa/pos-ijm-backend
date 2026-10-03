@@ -5,10 +5,10 @@ from app.database import get_db
 from app.models.barang import Barang
 from app.models.transaksi import StokSaatIni, TransaksiStok
 from app.schemas.stok import DashboardResponse, TransaksiOut
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
 from datetime import date
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_tenant_permission("stok"))])
 
 
 @router.get("")

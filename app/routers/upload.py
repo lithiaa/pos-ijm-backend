@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
 from app.database import get_db
 from app.models.barang import Barang, BarangFoto
 
@@ -16,7 +16,7 @@ os.makedirs(STORAGE_DIR, exist_ok=True)
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_tenant_permission("foto"))])
 
 
 def _env_filter(column, env_id: int, user):

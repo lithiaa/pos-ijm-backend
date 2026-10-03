@@ -63,6 +63,10 @@ def _validate_production_config() -> None:
         or activation_url.fragment
     ):
         invalid.append("INVITE_ACTIVATION_URL")
+    if not INVITE_SMTP_HOST:
+        invalid.append("INVITE_SMTP_HOST")
+    if not INVITE_FROM_EMAIL:
+        invalid.append("INVITE_FROM_EMAIL")
     for name in ("ADMIN_USERNAME", "ADMIN_PASSWORD"):
         if os.getenv(name):
             invalid.append(name)

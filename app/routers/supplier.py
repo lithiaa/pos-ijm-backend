@@ -2,14 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, get_current_user_env_id
+from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
 from app.database import get_db
 from app.models.barang import BarangSupplier
 from app.models.supplier import Supplier
 from app.schemas.supplier import SupplierCreate, SupplierOut, SupplierUpdate
 from app.services.supplier_code import assign_supplier_code
 
-router = APIRouter(prefix="/api/supplier", tags=["supplier"])
+router = APIRouter(prefix="/api/supplier", tags=["supplier"], dependencies=[Depends(require_tenant_permission("supplier"))])
 
 
 def _supplier_out(supplier: Supplier, jumlah_barang: int = 0) -> SupplierOut:
