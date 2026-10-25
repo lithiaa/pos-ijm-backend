@@ -6,6 +6,8 @@ from app.audit import AuditMiddleware
 from app.models.audit_log import AuditLog
 from app.models.admin import EnvironmentCopyJob, Invitation, ProvisionRequest, SupportGrant
 from app.models.user import User
+from app.models.pesanan_supplier import PesananSupplier
+from app.routers.pesanan_supplier import router as pesanan_supplier_router
 from app.routers import (
     auth_router,
     supplier_router,
@@ -57,6 +59,7 @@ app.include_router(printjob_router)
 app.include_router(environments_router)
 app.include_router(users_router)
 app.include_router(copy_jobs_router)
+app.include_router(pesanan_supplier_router)
 from app.routers.laporan import router as laporan_router
 app.include_router(laporan_router)
 
