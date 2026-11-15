@@ -8,7 +8,6 @@ from app.auth import create_access_token
 from app.models.barang import Barang
 from app.models.supplier import Supplier
 from app.models.user import User
-from app.services.harga import harga_encode
 from tests.conftest import TEST_INTEGRATION_KEY, get_legacy_environment
 
 
@@ -373,7 +372,6 @@ def test_barang_list_serializes_supplier_code_name_and_old_fields(
         "harga_modal": 10_000,
         "harga_beli_kode": "BUY-CODE",
         "harga_jual": 15_000,
-        "harga_jual_kode": harga_encode(15_000),
         "stok_minimum": 2,
         "satuan": "box",
         "deskripsi": "Kept",

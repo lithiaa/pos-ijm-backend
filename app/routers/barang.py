@@ -16,7 +16,7 @@ from app.models.transaksi import (
 from app.schemas.barang import BarangCreate, BarangUpdate, BarangOut, BarangListResponse, BarangSupplierOut, BarangPhotoOut
 from app.schemas.supplier import SupplierOut
 from app.auth import get_current_user, get_current_user_env_id, require_tenant_permission
-from app.services.harga import harga_encode, harga_decode
+from app.services.harga import harga_encode
 from app.routers.upload import STORAGE_DIR, _locked_barang, remove_unreferenced_file
 
 router = APIRouter(prefix="/api/barang", tags=["barang"], dependencies=[Depends(require_tenant_permission("barang"))])
@@ -77,7 +77,6 @@ def _barang_to_out(b: Barang) -> BarangOut:
         harga_modal=b.harga_modal,
         harga_beli_kode=b.harga_beli_kode or "",
         harga_jual=b.harga_jual,
-        harga_jual_kode=harga_encode(b.harga_jual),
         stok_minimum=b.stok_minimum,
         satuan=b.satuan,
         deskripsi=b.deskripsi,
@@ -181,11 +180,6 @@ def detail_barang(barang_id: int, db: Session = Depends(get_db), user=Depends(ge
 @router.post("")
 def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends(get_current_user), env_id: int = Depends(get_current_user_env_id)):
     _validate_supplier_id(db, req, env_id)
-    if req.harga_jual is not None:
-        harga_jual = req.harga_jual
-    else:
-        harga_jual = harga_decode(req.harga_jual_kode) if req.harga_jual_kode else 0
-
     sku = req.sku
     if not sku:
         count = db.query(func.count(Barang.id)).scalar() + 1
@@ -200,7 +194,7 @@ def create_barang(req: BarangCreate, db: Session = Depends(get_db), user=Depends
         supplier_id=req.supplier_id,
         harga_modal=req.harga_modal,
         harga_beli_kode=req.harga_beli_kode or harga_encode(req.harga_modal),
-        harga_jual=harga_jual,
+        harga_jual=req.harga_jual,
         stok_minimum=req.stok_minimum,
         satuan=req.satuan,
         deskripsi=req.deskripsi,
@@ -232,16 +226,8 @@ def update_barang(barang_id: int, req: BarangUpdate, db: Session = Depends(get_d
 
     # Update fields explicitly provided
     for field in req.model_fields_set:
-        if field == "harga_jual_kode":
-            continue
-        if field == "harga_jual":
-            b.harga_jual = req.harga_jual
-        else:
-            setattr(b, field, getattr(req, field))
+        setattr(b, field, getattr(req, field))
 
-    # Handle harga_jual_kode only if harga_jual not provided
-    if "harga_jual" not in req.model_fields_set and "harga_jual_kode" in req.model_fields_set:
-        b.harga_jual = harga_decode(req.harga_jual_kode)
     if "supplier_id" in req.model_fields_set and req.supplier_id is not None:
         if not db.get(BarangSupplier, (b.id, req.supplier_id)):
             db.add(BarangSupplier(environment_id=env_id, barang_id=b.id, supplier_id=req.supplier_id, jumlah_masuk_kumulatif=0))

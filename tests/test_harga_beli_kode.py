@@ -45,13 +45,18 @@ def test_main_barang_create_defaults_code_once_and_price_update_preserves_it(cli
             "sku": "MAIN-001",
             "nama": "Main Item",
             "harga_modal": 45_000,
-            "harga_jual_kode": harga_encode(60_000),
+            "harga_jual": 60_000,
         },
     )
 
     assert created.status_code == 200
     initial_code = harga_encode(45_000)
     assert created.json()["harga_beli_kode"] == initial_code
+    assert created.json()["harga_jual"] == 60_000
+    detail = client.get(f"/api/barang/{created.json()['id']}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["harga_jual"] == 60_000
+    assert "harga_jual_kode" not in detail.json()
 
     updated = client.put(
         f"/api/barang/{created.json()['id']}",
@@ -62,6 +67,18 @@ def test_main_barang_create_defaults_code_once_and_price_update_preserves_it(cli
     assert updated.status_code == 200
     assert updated.json()["harga_modal"] == 99_000
     assert updated.json()["harga_beli_kode"] == initial_code
+    assert updated.json()["harga_jual"] == 60_000
+
+    rejected = client.put(
+        f"/api/barang/{created.json()['id']}",
+        headers=headers,
+        json={"harga_jual_kode": harga_encode(80_000)},
+    )
+    assert rejected.status_code == 422
+    after_rejection = client.get(f"/api/barang/{created.json()['id']}", headers=headers)
+    assert after_rejection.status_code == 200
+    assert after_rejection.json()["harga_jual"] == 60_000
+    assert "harga_jual_kode" not in after_rejection.json()
     db.expire_all()
     barang = db.query(Barang).filter(Barang.sku == "MAIN-001").one()
     assert barang.harga_beli_kode == initial_code
@@ -77,7 +94,7 @@ def test_main_barang_explicit_code_is_trimmed_and_independent(client, db):
             "nama": "Manual Main Item",
             "harga_modal": 45_000,
             "harga_beli_kode": "  MAIN-MANUAL  ",
-            "harga_jual_kode": harga_encode(60_000),
+            "harga_jual": 60_000,
         },
     )
 
